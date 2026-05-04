@@ -61,7 +61,7 @@ test("creates a review, accepts public comments, and lets publisher resolve them
   assert.equal(page.statusCode, 200);
   assert.match(page.body, /Clearly Review/);
   assert.match(page.body, /data-role="review-composer"/);
-  assert.match(page.body, /Comment on selected text/);
+  assert.match(page.body, /New comment/);
   assert.match(page.body, /selection-popover/);
   assert.doesNotMatch(page.body, /Use Selection/);
 

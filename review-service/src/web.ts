@@ -106,7 +106,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       background: var(--surface);
     }
     .review-header {
-      padding: 22px 24px 18px;
+      padding: 18px 24px 14px;
       border-bottom: 1px solid var(--border);
     }
     .eyebrow {
@@ -119,7 +119,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     }
     h1 {
       margin: 0;
-      font-size: 20px;
+      font-size: 19px;
       line-height: 1.2;
       letter-spacing: 0;
     }
@@ -131,7 +131,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
 
     .review-scroll {
       overflow: auto;
-      padding: 18px 18px 28px;
+      padding: 0;
     }
     .card {
       border: 1px solid var(--border);
@@ -139,8 +139,8 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       background: var(--surface);
     }
     .composer-card {
-      padding: 16px;
-      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+      padding: 18px 24px 20px;
+      border-bottom: 1px solid var(--border);
     }
     .composer-title {
       display: flex;
@@ -187,9 +187,9 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     .selection-box {
       border: 1px solid var(--border);
       border-radius: 7px;
-      background: var(--surface-muted);
-      padding: 10px;
-      min-height: 52px;
+      background: #fafafa;
+      padding: 9px 10px;
+      min-height: 44px;
       color: var(--muted);
       font-size: 13px;
       line-height: 1.35;
@@ -233,7 +233,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     }
 
     .section {
-      margin-top: 18px;
+      padding: 18px 24px;
     }
     .section-title {
       display: flex;
@@ -330,7 +330,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     }
 
     .fork-card {
-      margin-top: 18px;
+      margin: 0 24px 24px;
       padding: 0;
     }
     .fork-card summary {
@@ -392,13 +392,13 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       </header>
 
       <div class="review-scroll">
-        <form class="card composer-card" id="comment-form" data-role="review-composer">
+        <form class="composer-card" id="comment-form" data-role="review-composer">
           <div class="composer-title">
-            <h2>Comment on selected text</h2>
-            <span id="selection-state-label">No selection</span>
+            <h2>New comment</h2>
+            <span id="selection-state-label">General comment</span>
           </div>
 
-          <div class="selection-box" id="selected">Highlight text in the document. Your comment will attach to that exact passage.</div>
+          <div class="selection-box" id="selected">Highlight text in the document to attach this comment to a specific passage.</div>
 
           <div class="name-row">
             <label for="display-name">Your name</label>
@@ -469,7 +469,13 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     const nameInput = document.getElementById("display-name");
     nameInput.value = localStorage.getItem(guestNameKey) || "";
 
-    frame.addEventListener("load", bindSnapshotSelection);
+    let boundSnapshotDocument = null;
+
+    frame.addEventListener("load", () => {
+      boundSnapshotDocument = null;
+      bindSnapshotSelection();
+    });
+    frame.addEventListener("mouseup", () => setTimeout(captureSelectionFromFrame, 0));
     selectionPopover.addEventListener("click", () => {
       selectionPopover.hidden = true;
       bodyInput.focus();
@@ -480,13 +486,20 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     document.getElementById("load-fork").addEventListener("click", loadForkMarkdown);
     document.getElementById("submit-fork").addEventListener("click", submitFork);
     nameInput.addEventListener("change", () => localStorage.setItem(guestNameKey, nameInput.value.trim()));
+    nameInput.addEventListener("input", () => localStorage.setItem(guestNameKey, nameInput.value.trim()));
     bodyInput.addEventListener("input", updateComposerState);
 
+    retryBindSnapshotSelection();
+    setInterval(() => {
+      if (document.activeElement === frame) captureSelectionFromFrame();
+    }, 300);
     loadComments();
 
     function bindSnapshotSelection() {
       const doc = snapshotDocument();
-      if (!doc) return;
+      if (!doc || !doc.body) return false;
+      if (doc === boundSnapshotDocument) return true;
+      boundSnapshotDocument = doc;
       injectSnapshotReviewStyles(doc);
       doc.addEventListener("mouseup", () => setTimeout(captureSelectionFromFrame, 0));
       doc.addEventListener("keyup", () => setTimeout(captureSelectionFromFrame, 0));
@@ -496,6 +509,12 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
         if (mark) focusComment(mark.dataset.reviewHighlight);
       });
       applyCommentHighlights();
+      return true;
+    }
+
+    function retryBindSnapshotSelection() {
+      if (bindSnapshotSelection()) return;
+      setTimeout(retryBindSnapshotSelection, 100);
     }
 
     function snapshotDocument() {
@@ -615,10 +634,10 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
 
     function renderSelectedText() {
       selectedBox.classList.toggle("has-selection", Boolean(selectedText));
-      selectionStateLabel.textContent = selectedText ? "Selection captured" : "No selection";
+      selectionStateLabel.textContent = selectedText ? "Attached to selection" : "General comment";
       selectedBox.innerHTML = selectedText
         ? "<blockquote>" + escapeText(selectedText) + "</blockquote>"
-        : "Highlight text in the document. Your comment will attach to that exact passage.";
+        : "Highlight text in the document to attach this comment to a specific passage.";
       errorBox.textContent = "";
     }
 
@@ -635,16 +654,26 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     }
 
     function updateComposerState() {
-      postButton.disabled = !selectedAnchor || !bodyInput.value.trim();
+      postButton.disabled = !bodyInput.value.trim();
+    }
+
+    function documentAnchor() {
+      return {
+        blockType: "paragraph",
+        sourcepos: "",
+        headingId: "",
+        charOffsetInBlock: null,
+        charLength: 0,
+        selectedText: null,
+        prefix: null,
+        suffix: null,
+        confidence: "section",
+        anchorNormalizerVersion: 1
+      };
     }
 
     async function postComment(event) {
       event.preventDefault();
-      if (!selectedAnchor) {
-        errorBox.textContent = "Highlight text in the document before posting.";
-        return;
-      }
-
       const displayName = nameInput.value.trim() || "Reviewer";
       localStorage.setItem(guestNameKey, displayName);
       const body = bodyInput.value.trim();
@@ -666,7 +695,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
           selectedText,
           suggestedReplacement,
           suggestionMode: suggestedReplacement ? "advisory" : "advisory",
-          anchor: selectedAnchor
+          anchor: selectedAnchor || documentAnchor()
         })
       });
 
