@@ -253,7 +253,7 @@ final class ReviewServiceClient {
             files: files
         )
         try ReviewCredentialStore.storePublisherToken(response.accessToken, account: response.keychainAccount)
-        return response
+        return normalized(response)
     }
 
     func fetchAllComments(reviewId: String) async throws -> ReviewCommentsCache {
@@ -306,12 +306,13 @@ final class ReviewServiceClient {
             MultipartFile(name: "sourceMapJson", filename: "source-map.json", contentType: "application/json", data: sourceMapData)
         ]
 
-        return try await multipartRequest(
+        let response: ReviewPublishVersionResponse = try await multipartRequest(
             method: "POST",
             path: ["api", "reviews", reviewId, "versions"],
             fields: fields,
             files: files
         )
+        return normalized(response)
     }
 
     func resolveComment(
@@ -358,10 +359,22 @@ final class ReviewServiceClient {
             method: "GET",
             path: ["api", "reviews", reviewId, "forks", forkId]
         )
+        let normalizedMarkdownURL = absoluteURLString(detail.markdownUrl)
         guard detail.markdownSource == nil else {
-            return detail
+            return ReviewForkDetail(
+                forkId: detail.forkId,
+                reviewId: detail.reviewId,
+                version: detail.version,
+                authorId: detail.authorId,
+                authorDisplayName: detail.authorDisplayName,
+                createdAt: detail.createdAt,
+                markdownSource: detail.markdownSource,
+                markdownUrl: normalizedMarkdownURL,
+                markdownUrlExpiresAt: detail.markdownUrlExpiresAt,
+                diff: detail.diff
+            )
         }
-        let markdown = try await fetchMarkdown(urlString: detail.markdownUrl)
+        let markdown = try await fetchMarkdown(urlString: normalizedMarkdownURL)
         return ReviewForkDetail(
             forkId: detail.forkId,
             reviewId: detail.reviewId,
@@ -370,7 +383,7 @@ final class ReviewServiceClient {
             authorDisplayName: detail.authorDisplayName,
             createdAt: detail.createdAt,
             markdownSource: markdown,
-            markdownUrl: detail.markdownUrl,
+            markdownUrl: normalizedMarkdownURL,
             markdownUrlExpiresAt: detail.markdownUrlExpiresAt,
             diff: detail.diff
         )
@@ -444,7 +457,7 @@ final class ReviewServiceClient {
     }
 
     private func fetchMarkdown(urlString: String) async throws -> String {
-        guard let url = URL(string: urlString) else {
+        guard let url = URL(string: absoluteURLString(urlString)) else {
             throw ToolError.schemaVersionUnsupported("Review API returned an invalid fork Markdown URL.")
         }
         var request = URLRequest(url: url)
@@ -483,6 +496,41 @@ final class ReviewServiceClient {
         }
         components.queryItems = query
         return components.url ?? base
+    }
+
+    private func normalized(_ response: ReviewCreateResponse) -> ReviewCreateResponse {
+        ReviewCreateResponse(
+            reviewId: response.reviewId,
+            reviewUrl: absoluteURLString(response.reviewUrl),
+            publicReviewToken: response.publicReviewToken,
+            accessToken: response.accessToken,
+            keychainAccount: response.keychainAccount,
+            publisherId: response.publisherId,
+            version: response.version,
+            snapshotUrl: absoluteURLString(response.snapshotUrl),
+            createdAt: response.createdAt
+        )
+    }
+
+    private func normalized(_ response: ReviewPublishVersionResponse) -> ReviewPublishVersionResponse {
+        ReviewPublishVersionResponse(
+            reviewId: response.reviewId,
+            version: response.version,
+            snapshotUrl: absoluteURLString(response.snapshotUrl),
+            createdAt: response.createdAt,
+            remappedComments: response.remappedComments
+        )
+    }
+
+    private func absoluteURLString(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed), url.scheme != nil {
+            return trimmed
+        }
+        guard trimmed.hasPrefix("/") else {
+            return trimmed
+        }
+        return URL(string: trimmed, relativeTo: configuration.baseURL)?.absoluteURL.absoluteString ?? trimmed
     }
 
     private func mapHTTPError(statusCode: Int, data: Data) -> ToolError {

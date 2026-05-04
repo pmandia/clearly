@@ -135,11 +135,11 @@ final class ReviewSidebarState {
                 if result.succeeded {
                     switch action {
                     case "create":
-                        lastActionMessage = "Created hosted review."
+                        lastActionMessage = "Review link ready."
                     case "publish":
-                        lastActionMessage = "Published new review version."
+                        lastActionMessage = "Update published."
                     default:
-                        lastActionMessage = "Synced review comments."
+                        lastActionMessage = "Comments updated."
                     }
                     reload(fileURL: activeFileURL, vaultRoot: activeVaultRoot)
                 } else {

@@ -30,6 +30,23 @@ test("requires a distinct signed URL secret at config load", () => {
   assert.equal(loaded.signedUrlSecret, "signed-url-secret");
 });
 
+test("normalizes public base URL for generated review links", () => {
+  const loaded = loadConfig({
+    PORT: "0",
+    PUBLIC_BASE_URL: "reviews.example.test/",
+    CLEARLY_REVIEW_PUBLISHER_TOKEN: "admin-token",
+    CLEARLY_REVIEW_SIGNED_URL_SECRET: "signed-url-secret",
+  });
+  assert.equal(loaded.publicBaseUrl, "https://reviews.example.test");
+
+  assert.throws(() => loadConfig({
+    PORT: "0",
+    PUBLIC_BASE_URL: "",
+    CLEARLY_REVIEW_PUBLISHER_TOKEN: "admin-token",
+    CLEARLY_REVIEW_SIGNED_URL_SECRET: "signed-url-secret",
+  }), /PUBLIC_BASE_URL/);
+});
+
 test("creates a review, accepts public comments, and lets publisher resolve them", async () => {
   const app = buildServer(new MemoryReviewStore(), config);
   await app.ready();

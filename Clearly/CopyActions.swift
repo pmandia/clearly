@@ -41,7 +41,8 @@ enum CopyActions {
         let text: String
         do {
             let context = try ReviewStateStore.context(for: url, vaultRoot: vaultRoot)
-            text = context.reviewUrl ?? "No review link exists yet for \(context.vaultURI). Use Share for Review after the review service is configured."
+            text = ReviewLinkFormatter.absoluteString(context.reviewUrl)
+                ?? "No review link exists yet for \(context.vaultURI). Use Create Review Link after the review service is configured."
         } catch {
             text = "Unable to resolve review link for \(url.path): \(error)"
         }
@@ -184,6 +185,41 @@ enum CopyActions {
         sub.addItem(plainItem)
 
         return sub
+    }
+}
+
+enum ReviewLinkFormatter {
+    static func absoluteString(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+        if let url = URL(string: raw), url.scheme != nil {
+            return raw
+        }
+        guard raw.hasPrefix("/"),
+              let baseURL = reviewServiceBaseURL() else {
+            return raw
+        }
+        return URL(string: raw, relativeTo: baseURL)?.absoluteURL.absoluteString ?? raw
+    }
+
+    static func absoluteURL(_ raw: String?) -> URL? {
+        guard let absolute = absoluteString(raw) else { return nil }
+        guard let url = URL(string: absolute), url.scheme != nil else { return nil }
+        return url
+    }
+
+    private static func reviewServiceBaseURL() -> URL? {
+        guard let raw = ProcessInfo.processInfo.environment["CLEARLY_REVIEW_API_BASE_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+        let normalized = raw.hasPrefix("http://") || raw.hasPrefix("https://")
+            ? raw
+            : "https://\(raw)"
+        return URL(string: normalized)
     }
 }
 

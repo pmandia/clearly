@@ -1226,9 +1226,9 @@ struct ViewModeCommands: View {
 
 // MARK: - AI Commands
 //
-// The "AI" menu surfaces every AI-powered action: Chat (works against any
-// vault), Capture and Toggle Log Sidebar (wiki-vault-only and disabled
-// otherwise), and "New LLM Wiki…" for creating a new wiki vault. Struct
+// The "AI" menu surfaces AI-powered wiki actions: Capture and Toggle Log
+// Sidebar (wiki-vault-only and disabled otherwise), and "New LLM Wiki…" for
+// creating a new wiki vault. Struct
 // name stays `WikiCommands` for git-blame continuity; the user-facing menu
 // label is "AI".
 struct WikiCommands: View {
@@ -1250,10 +1250,12 @@ struct WikiCommands: View {
         .keyboardShortcut("i", modifiers: [.command, .control])
         .disabled(!enabled)
 
-        Button("Chat") {
-            NotificationCenter.default.post(name: .wikiChat, object: nil)
+        if WikiChatFeature.isEnabled {
+            Button("Chat") {
+                NotificationCenter.default.post(name: .wikiChat, object: nil)
+            }
+            .keyboardShortcut("a", modifiers: [.command, .control])
         }
-        .keyboardShortcut("a", modifiers: [.command, .control])
 
         Divider()
 

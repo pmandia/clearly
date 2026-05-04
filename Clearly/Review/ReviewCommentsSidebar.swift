@@ -33,55 +33,24 @@ struct ReviewCommentsSidebar: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
-            Text("REVIEW")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .tracking(1.5)
+            Text("Review")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
             Spacer()
-
-            if let reviewURL {
-                Button {
-                    NSWorkspace.shared.open(reviewURL)
-                } label: {
-                    Image(systemName: "arrow.up.forward.square")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-                .help("Open review link")
-            }
-
-            Button {
-                state.syncCurrent()
-            } label: {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .buttonStyle(.plain)
-            .disabled(state.isBusy || state.context?.reviewId == nil)
-            .help("Sync review comments")
-
-            Button {
-                state.publishCurrentVersion()
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .buttonStyle(.plain)
-            .disabled(state.isBusy || state.context?.reviewId == nil)
-            .help("Publish new review version")
 
             Menu {
                 Button("Copy Review Link") {
                     copyReviewLink()
                 }
-                Button("Copy Review Prompt") {
+                Button("Copy Agent Prompt") {
                     copyReviewPrompt()
                 }
-                Button("Copy Review Context Path") {
+                Button("Copy Agent Context Path") {
                     copyReviewContextPath()
+                }
+                Divider()
+                Button("Reload Sidebar") {
+                    state.reload(fileURL: activeFileURL, vaultRoot: activeVaultRoot)
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -90,17 +59,7 @@ struct ReviewCommentsSidebar: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .help("Review copy actions")
-
-            Button {
-                state.reload(fileURL: activeFileURL, vaultRoot: activeVaultRoot)
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .buttonStyle(.plain)
-            .help("Reload cached comments")
+            .help("More review actions")
 
             Button {
                 state.hide()
@@ -155,35 +114,24 @@ struct ReviewCommentsSidebar: View {
     private func unlinkedReviewContent(context: ReviewContextPayload) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("No hosted review linked.")
+                Text("Not shared for review")
                     .font(.headline)
-                Text(context.vaultURI)
-                    .font(.caption)
+                Text(context.targetRelativePath)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .truncationMode(.middle)
-                    .textSelection(.enabled)
             }
 
             HStack(spacing: 8) {
                 Button {
                     state.createReview()
                 } label: {
-                    Label("Share", systemImage: "person.2.badge.plus")
+                    Label("Create Link", systemImage: "link.badge.plus")
                 }
                 .disabled(state.isBusy)
-                Button {
-                    copyReviewPrompt()
-                } label: {
-                    Label("Prompt", systemImage: "text.quote")
-                }
-                Button {
-                    copyReviewContextPath()
-                } label: {
-                    Label("Context", systemImage: "doc.badge.gearshape")
-                }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
 
             if state.isBusy || state.lastActionMessage != nil {
                 actionStatus
@@ -194,23 +142,30 @@ struct ReviewCommentsSidebar: View {
 
     private var linkedReviewContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            reviewSummary
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+            reviewLinkPanel
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
             separator
             if state.isBusy || state.lastActionMessage != nil {
                 actionStatus
                 separator
             }
-            Picker("Comment Filter", selection: $state.filter) {
-                ForEach(ReviewCommentsFilter.allCases) { filter in
-                    Text(filter.label).tag(filter)
+            reviewSummary
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, state.cache?.comments.isEmpty == false ? 8 : 0)
+
+            if state.cache?.comments.isEmpty == false {
+                Picker("Comment Filter", selection: $state.filter) {
+                    ForEach(ReviewCommentsFilter.allCases) { filter in
+                        Text(filter.label).tag(filter)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
 
             if state.filteredComments.isEmpty {
                 emptyComments
@@ -228,6 +183,61 @@ struct ReviewCommentsSidebar: View {
                     .padding(.bottom, 8)
                 }
             }
+        }
+    }
+
+    private var reviewLinkPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Review link ready")
+                    .font(.headline)
+                if let context = state.context {
+                    Text(context.targetRelativePath)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    copyReviewLink()
+                } label: {
+                    Label("Copy Link", systemImage: "link")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(reviewURL == nil)
+
+                Button {
+                    if let reviewURL {
+                        NSWorkspace.shared.open(reviewURL)
+                    }
+                } label: {
+                    Label("Open", systemImage: "arrow.up.forward.square")
+                }
+                .buttonStyle(.bordered)
+                .disabled(reviewURL == nil)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    state.syncCurrent()
+                } label: {
+                    Label("Fetch", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.isBusy || state.context?.reviewId == nil)
+
+                Button {
+                    state.publishCurrentVersion()
+                } label: {
+                    Label("Publish Update", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.isBusy || state.context?.reviewId == nil)
+            }
+            .controlSize(.small)
         }
     }
 
@@ -274,14 +284,6 @@ struct ReviewCommentsSidebar: View {
             Text(syncLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if let context = state.context {
-                Text(context.vaultURI)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-            }
         }
     }
 
@@ -297,8 +299,7 @@ struct ReviewCommentsSidebar: View {
     }
 
     private var reviewURL: URL? {
-        guard let raw = state.context?.reviewUrl else { return nil }
-        return URL(string: raw)
+        ReviewLinkFormatter.absoluteURL(state.context?.reviewUrl)
     }
 
     private var syncLabel: String {

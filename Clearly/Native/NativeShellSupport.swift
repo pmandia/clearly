@@ -22,6 +22,10 @@ extension Notification.Name {
     static let reviewToggleSidebar = Notification.Name("reviewToggleSidebar")
 }
 
+enum WikiChatFeature {
+    static let isEnabled = false
+}
+
 // MARK: - Focused values
 //
 // Menu commands read these via `@FocusedValue` to act on the active window

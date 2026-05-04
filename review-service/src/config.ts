@@ -17,10 +17,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServiceConfig 
   }
   return {
     port: Number(env.PORT ?? 3000),
-    publicBaseUrl: env.PUBLIC_BASE_URL ?? `http://localhost:${env.PORT ?? 3000}`,
+    publicBaseUrl: normalizePublicBaseUrl(env.PUBLIC_BASE_URL, env.PORT),
     publisherToken,
     publisherTokenHash: publisherToken ? sha256(publisherToken) : undefined,
     signedUrlSecret,
     databaseUrl: env.DATABASE_URL,
   };
+}
+
+function normalizePublicBaseUrl(raw: string | undefined, port: string | undefined): string {
+  if (raw === undefined) {
+    return `http://localhost:${port ?? 3000}`;
+  }
+
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    throw new Error("PUBLIC_BASE_URL must be an absolute public URL, for example https://clearly-production.up.railway.app.");
+  }
+  if (trimmed.startsWith("/")) {
+    throw new Error("PUBLIC_BASE_URL must include a host, for example https://clearly-production.up.railway.app.");
+  }
+
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const url = new URL(withScheme);
+  return url.toString().replace(/\/$/, "");
 }

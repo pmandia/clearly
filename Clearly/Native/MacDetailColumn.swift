@@ -104,8 +104,8 @@ struct MacDetailToolbar: ToolbarContent {
                     Divider()
                     if let root = workspace.containingVaultRoot(for: url) {
                         Button("Copy Review Link") { CopyActions.copyReviewLink(url, vaultRoot: root) }
-                        Button("Copy Review Prompt") { CopyActions.copyReviewPrompt(url, vaultRoot: root) }
-                        Button("Copy Review Context Path") { CopyActions.copyReviewContextPath(url, vaultRoot: root) }
+                        Button("Copy Agent Prompt") { CopyActions.copyReviewPrompt(url, vaultRoot: root) }
+                        Button("Copy Agent Context Path") { CopyActions.copyReviewContextPath(url, vaultRoot: root) }
                         Divider()
                     }
                 }
@@ -121,25 +121,29 @@ struct MacDetailToolbar: ToolbarContent {
             .disabled(workspace.activeDocumentID == nil)
 
             Menu {
-                Button("Review Comments") {
+                Button("Show Review Sidebar") {
                     toggleReviewSidebar()
                 }
-                Button("Share for Review") {
+                Button("Create Review Link") {
                     showReviewSidebarAndCreate()
                 }
-                Button("Sync Review Comments") {
+                Divider()
+                Button("Fetch Latest Comments") {
                     showReviewSidebarAndSync()
                 }
-                Button("Publish New Version") {
+                Button("Publish Updated File") {
                     showReviewSidebarAndPublish()
                 }
                 Divider()
                 if let url = workspace.currentFileURL,
                    let root = workspace.containingVaultRoot(for: url) {
-                    Button("Copy Review Prompt") {
+                    Button("Copy Review Link") {
+                        CopyActions.copyReviewLink(url, vaultRoot: root)
+                    }
+                    Button("Copy Agent Prompt") {
                         CopyActions.copyReviewPrompt(url, vaultRoot: root)
                     }
-                    Button("Copy Review Context Path") {
+                    Button("Copy Agent Context Path") {
                         CopyActions.copyReviewContextPath(url, vaultRoot: root)
                     }
                 }
@@ -182,17 +186,13 @@ struct MacDetailToolbar: ToolbarContent {
             }
         }
 
-        // Visual break so the chat/wiki cluster renders as its own Liquid
+        // Visual break so the wiki cluster renders as its own Liquid
         // Glass pill on macOS 26+, mirroring the centered editor/preview
-        // group. Always present so the chat button sits in a consistent
-        // position whether or not the vault is a wiki.
-        if #available(macOS 26.0, *) {
+        // group.
+        if workspace.activeVaultIsWiki, #available(macOS 26.0, *) {
             ToolbarSpacer(.fixed, placement: .primaryAction)
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            // Pending-operation badge and Capture stay wiki-only — they
-            // depend on the wiki marker scheme and review log. Chat is
-            // available in any vault.
             if workspace.activeVaultIsWiki {
                 if wikiController.hasPendingOperation {
                     let count = wikiController.pendingOperation?.changes.count ?? 0
@@ -222,13 +222,6 @@ struct MacDetailToolbar: ToolbarContent {
                 }
                 .help("Capture into this wiki (⌃⌘I)")
             }
-
-            Button {
-                NotificationCenter.default.post(name: .wikiChat, object: nil)
-            } label: {
-                Label("Chat", systemImage: "bubble.left.and.bubble.right")
-            }
-            .help("Chat with this vault (⌃⌘A)")
         }
     }
 
@@ -321,7 +314,7 @@ struct MacDetailColumn: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
-            if wikiChat.isVisible {
+            if WikiChatFeature.isEnabled, wikiChat.isVisible {
                 WikiChatView(
                     chat: wikiChat,
                     locations: workspace.locations,
@@ -951,7 +944,7 @@ struct MacDetailColumn: View {
 
 /// Extracted modifier so MacDetailColumn.body stays inside SwiftUI's
 /// type-checker budget. Handles every NotificationCenter-driven Wiki action
-/// (Capture / Chat / Review / Toggle Log Sidebar).
+/// (Capture / Review / Toggle Log Sidebar).
 private struct WikiNotificationObserversModifier: ViewModifier {
     @Bindable var workspace: WorkspaceManager
     @Bindable var wikiController: WikiOperationController
@@ -966,6 +959,7 @@ private struct WikiNotificationObserversModifier: ViewModifier {
                 WikiAgentCoordinator.startCapture(workspace: workspace, capture: wikiCapture)
             }
             .onReceive(NotificationCenter.default.publisher(for: .wikiChat)) { _ in
+                guard WikiChatFeature.isEnabled else { return }
                 WikiAgentCoordinator.startChat(workspace: workspace, chat: wikiChat)
             }
             .onReceive(NotificationCenter.default.publisher(for: .wikiToggleLogSidebar)) { _ in
