@@ -419,6 +419,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     let selectedAnchor = null;
     let commentsCache = [];
     let editingCommentId = null;
+    let confirmingDeleteCommentId = null;
 
     const guestIdKey = "clearlyReviewGuestId:" + token;
     const guestNameKey = "clearlyReviewDisplayName";
@@ -670,7 +671,8 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
         return '<article class="card comment' + (isEditing ? ' is-editing' : '') + '" data-comment-id="' + escapeText(id) + '">' +
           '<div class="comment-meta"><strong>' + escapeText(comment.authorDisplayName || comment.author || "Reviewer") + '</strong>' +
           '<span class="comment-time">' + escapeText(formatTimestamp(comment.createdAt)) + '</span>' +
-          (comment.status === "resolved" ? '<span>Resolved</span>' : '') + '</div>' +
+          (comment.status === "resolved" ? '<span>Resolved</span>' : '') +
+          (comment.status === "closed" ? '<span>Closed</span>' : '') + '</div>' +
           (comment.selectedText ? '<blockquote class="quote">' + escapeText(comment.selectedText) + '</blockquote>' : '') +
           (isEditing ? editFormFor(comment) : '<p class="comment-body">' + escapeText(comment.body) + '</p>') +
           (!isEditing && comment.suggestedReplacement ? '<div class="replacement"><strong>Suggested replacement</strong><br>' + escapeText(comment.suggestedReplacement) + '</div>' : '') +
@@ -687,11 +689,27 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       });
       commentsContainer.querySelectorAll("[data-edit-comment]").forEach(button => button.addEventListener("click", event => {
         event.stopPropagation();
+        confirmingDeleteCommentId = null;
         startEditingComment(button.dataset.editComment);
       }));
       commentsContainer.querySelectorAll("[data-edit-cancel]").forEach(button => button.addEventListener("click", event => {
         event.stopPropagation();
         cancelCommentEdit();
+      }));
+      commentsContainer.querySelectorAll("[data-delete-comment]").forEach(button => button.addEventListener("click", event => {
+        event.stopPropagation();
+        confirmingDeleteCommentId = button.dataset.deleteComment;
+        editingCommentId = null;
+        renderComments();
+      }));
+      commentsContainer.querySelectorAll("[data-delete-cancel]").forEach(button => button.addEventListener("click", event => {
+        event.stopPropagation();
+        confirmingDeleteCommentId = null;
+        renderComments();
+      }));
+      commentsContainer.querySelectorAll("[data-delete-confirm]").forEach(button => button.addEventListener("click", event => {
+        event.stopPropagation();
+        deleteComment(button.dataset.deleteConfirm);
       }));
       commentsContainer.querySelectorAll("[data-edit-form]").forEach(form => {
         form.addEventListener("click", event => event.stopPropagation());
@@ -738,12 +756,20 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       const owns = comment.authorId === guestId;
       if (!owns) return "";
       const buttons = [];
+      if (confirmingDeleteCommentId === id) {
+        return '<div class="comment-actions">' +
+          '<span class="edit-error">Delete this comment?</span>' +
+          '<button type="button" data-delete-cancel="' + escapeText(id) + '">Cancel</button>' +
+          '<button type="button" data-delete-confirm="' + escapeText(id) + '">Delete</button>' +
+        '</div>';
+      }
       if (comment.status === "open") {
         buttons.push('<button type="button" data-edit-comment="' + escapeText(id) + '">Edit</button>');
       }
       if (comment.status === "resolved") {
         buttons.push('<button type="button" data-reopen-comment="' + escapeText(id) + '">Reopen</button>');
       }
+      buttons.push('<button type="button" data-delete-comment="' + escapeText(id) + '">Delete</button>');
       return buttons.length ? '<div class="comment-actions">' + buttons.join("") + '</div>' : "";
     }
 
@@ -751,6 +777,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       const comment = commentsCache.find(item => (item.id || item.commentId) === commentId);
       if (!comment) return;
       editingCommentId = commentId;
+      confirmingDeleteCommentId = null;
       renderComments();
     }
 
@@ -808,6 +835,28 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
         return;
       }
       editingCommentId = null;
+      await loadComments();
+    }
+
+    async function deleteComment(commentId) {
+      const comment = commentsCache.find(item => (item.id || item.commentId) === commentId);
+      if (!comment) return;
+      const response = await fetch("/r/" + encodeURIComponent(token) + "/comments/" + encodeURIComponent(commentId), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          authorId: guestId,
+          expectedRevision: comment.remoteRevision
+        })
+      });
+      if (!response.ok) {
+        const card = Array.from(commentsContainer.querySelectorAll("[data-comment-id]"))
+          .find(element => element.dataset.commentId === commentId);
+        const error = card && card.querySelector(".edit-error");
+        if (error) error.textContent = await response.text();
+        return;
+      }
+      confirmingDeleteCommentId = null;
       await loadComments();
     }
 

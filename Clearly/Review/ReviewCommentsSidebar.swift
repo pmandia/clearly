@@ -175,7 +175,9 @@ struct ReviewCommentsSidebar: View {
                         ForEach(state.filteredComments, id: \.id) { comment in
                             ReviewCommentRow(
                                 comment: comment,
-                                isPendingResolution: state.pendingCommentIds.contains(comment.id)
+                                isPendingResolution: state.pendingCommentIds.contains(comment.id),
+                                onClose: { state.closeComment(comment) },
+                                onDelete: { state.deleteComment(comment) }
                             )
                             Divider().padding(.horizontal, 12)
                         }
@@ -263,7 +265,8 @@ struct ReviewCommentsSidebar: View {
 
     private var reviewSummary: some View {
         let comments = state.cache?.comments ?? []
-        let openCount = comments.filter { $0.status != "resolved" }.count
+        let openCount = comments.filter { $0.status == "open" || $0.status.isEmpty }.count
+        let closedCount = comments.filter { $0.status == "closed" }.count
         let resolvedCount = comments.filter { $0.status == "resolved" }.count
         let pendingCount = state.pendingResolutions.pending.count
 
@@ -271,6 +274,11 @@ struct ReviewCommentsSidebar: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(openCount) open")
                     .font(.headline)
+                if closedCount > 0 {
+                    Text("\(closedCount) closed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text("\(resolvedCount) resolved")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -327,6 +335,10 @@ struct ReviewCommentsSidebar: View {
 private struct ReviewCommentRow: View {
     let comment: ReviewComment
     let isPendingResolution: Bool
+    let onClose: () -> Void
+    let onDelete: () -> Void
+
+    @State private var confirmDelete = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -391,6 +403,33 @@ private struct ReviewCommentRow: View {
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .lineLimit(1)
+
+            if canMutate {
+                HStack(spacing: 8) {
+                    if statusLabel == "open" {
+                        Button("Close") {
+                            onClose()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    Button(confirmDelete ? "Confirm Delete" : "Delete", role: .destructive) {
+                        if confirmDelete {
+                            onDelete()
+                        } else {
+                            confirmDelete = true
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    if confirmDelete {
+                        Button("Cancel") {
+                            confirmDelete = false
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .font(.caption)
+                .disabled(isPendingResolution)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -401,7 +440,16 @@ private struct ReviewCommentRow: View {
     }
 
     private var statusColor: Color {
-        comment.status == "resolved" ? .secondary : .accentColor
+        switch comment.status {
+        case "resolved", "closed":
+            return .secondary
+        default:
+            return .accentColor
+        }
+    }
+
+    private var canMutate: Bool {
+        comment.status != "resolved" && comment.status != "deleted"
     }
 
     private var anchorLabel: String {

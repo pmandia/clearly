@@ -31,7 +31,9 @@ export interface ReviewStore {
   createComment(reviewId: string, input: CreateCommentInput): Promise<ReviewComment>;
   updateComment(reviewId: string, commentId: string, input: UpdateCommentInput): Promise<ReviewComment | "conflict" | undefined>;
   updateCommentRemap(reviewId: string, commentId: string, input: CommentRemapInput): Promise<ReviewComment | undefined>;
-  deleteComment(reviewId: string, commentId: string, authorId: string): Promise<boolean>;
+  closeComment(reviewId: string, commentId: string, expectedRevision: number, closedBy: string, note?: string): Promise<ReviewComment | "conflict" | undefined>;
+  deleteComment(reviewId: string, commentId: string, authorId: string, expectedRevision?: number): Promise<ReviewComment | "conflict" | undefined>;
+  deleteCommentAsPublisher(reviewId: string, commentId: string, expectedRevision: number, deletedBy: string): Promise<ReviewComment | "conflict" | undefined>;
   resolveComment(reviewId: string, commentId: string, expectedRevision: number, resolvedBy: string, note?: string): Promise<ReviewComment | "conflict" | undefined>;
   reopenComment(reviewId: string, commentId: string, expectedRevision: number, authorId: string): Promise<ReviewComment | "conflict" | undefined>;
   createFork(reviewId: string, input: CreateForkInput): Promise<ReviewForkDetail | undefined>;
@@ -243,14 +245,40 @@ export class MemoryReviewStore implements ReviewStore {
     return comment;
   }
 
-  async deleteComment(reviewId: string, commentId: string, authorId: string): Promise<boolean> {
+  async closeComment(reviewId: string, commentId: string, expectedRevision: number, closedBy: string, note = ""): Promise<ReviewComment | "conflict" | undefined> {
     const comment = this.findComment(reviewId, commentId);
-    if (!comment || comment.authorId !== authorId) return false;
+    if (!comment || comment.status === "deleted") return undefined;
+    if (comment.remoteRevision !== expectedRevision) return "conflict";
+    comment.status = "closed";
+    comment.resolvedBy = closedBy;
+    comment.resolvedAt = new Date().toISOString();
+    comment.resolutionNote = note;
+    comment.remoteRevision += 1;
+    comment.updatedAt = comment.resolvedAt;
+    await this.logEvent(reviewId, "publisher", closedBy, "comment.closed", { commentId, note });
+    return comment;
+  }
+
+  async deleteComment(reviewId: string, commentId: string, authorId: string, expectedRevision?: number): Promise<ReviewComment | "conflict" | undefined> {
+    const comment = this.findComment(reviewId, commentId);
+    if (!comment || comment.status === "deleted" || comment.authorId !== authorId) return undefined;
+    if (expectedRevision !== undefined && comment.remoteRevision !== expectedRevision) return "conflict";
     comment.status = "deleted";
     comment.remoteRevision += 1;
     comment.updatedAt = new Date().toISOString();
     await this.logEvent(reviewId, "reviewer", authorId, "comment.deleted", { commentId });
-    return true;
+    return comment;
+  }
+
+  async deleteCommentAsPublisher(reviewId: string, commentId: string, expectedRevision: number, deletedBy: string): Promise<ReviewComment | "conflict" | undefined> {
+    const comment = this.findComment(reviewId, commentId);
+    if (!comment || comment.status === "deleted") return undefined;
+    if (comment.remoteRevision !== expectedRevision) return "conflict";
+    comment.status = "deleted";
+    comment.remoteRevision += 1;
+    comment.updatedAt = new Date().toISOString();
+    await this.logEvent(reviewId, "publisher", deletedBy, "comment.deleted", { commentId });
+    return comment;
   }
 
   async resolveComment(reviewId: string, commentId: string, expectedRevision: number, resolvedBy: string, note = ""): Promise<ReviewComment | "conflict" | undefined> {

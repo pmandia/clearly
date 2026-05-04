@@ -165,6 +165,43 @@ export function buildServer(store: ReviewStore, config: ServiceConfig): FastifyI
     return resolvePayload(result);
   });
 
+  app.post("/api/reviews/:reviewId/comments/:commentId/close", async (request) => {
+    requireRateLimit(commentMutationLimiter, request.ip, "Too many comment updates. Try again in a minute.");
+    const params = request.params as Record<string, string>;
+    const review = await store.getReview(params.reviewId);
+    if (!review) throw notFound("review_not_found", "Review not found.");
+    await requirePublisherForReview(request, store, config, review.id);
+    const body = objectBody(request.body);
+    const result = await store.closeComment(
+      review.id,
+      params.commentId,
+      numberParam(body.expectedRevision),
+      requiredString(body.closedBy ?? body.resolvedBy ?? "publisher", "closedBy"),
+      stringParam(body.resolutionNote) ?? ""
+    );
+    if (result === "conflict") throw httpError(409, "conflict", "Comment revision changed before close.");
+    if (!result) throw notFound("comment_not_found", "Comment not found.");
+    return resolvePayload(result);
+  });
+
+  app.delete("/api/reviews/:reviewId/comments/:commentId", async (request) => {
+    requireRateLimit(commentMutationLimiter, request.ip, "Too many comment updates. Try again in a minute.");
+    const params = request.params as Record<string, string>;
+    const review = await store.getReview(params.reviewId);
+    if (!review) throw notFound("review_not_found", "Review not found.");
+    await requirePublisherForReview(request, store, config, review.id);
+    const body = objectBody(request.body);
+    const result = await store.deleteCommentAsPublisher(
+      review.id,
+      params.commentId,
+      numberParam(body.expectedRevision),
+      requiredString(body.deletedBy ?? "publisher", "deletedBy")
+    );
+    if (result === "conflict") throw httpError(409, "conflict", "Comment revision changed before delete.");
+    if (!result) throw notFound("comment_not_found", "Comment not found.");
+    return deletePayload(result);
+  });
+
   app.post("/api/reviews/:reviewId/comments/:commentId/reopen", async (request) => {
     requireRateLimit(commentMutationLimiter, request.ip, "Too many comment updates. Try again in a minute.");
     const params = request.params as Record<string, string>;
@@ -316,6 +353,23 @@ export function buildServer(store: ReviewStore, config: ServiceConfig): FastifyI
     return reply.code(201).send({ comment });
   });
 
+  app.delete("/r/:token/comments/:commentId", async (request) => {
+    requireRateLimit(commentMutationLimiter, request.ip, "Too many comment updates. Try again in a minute.");
+    const params = request.params as Record<string, string>;
+    const review = await store.getReviewByPublicToken(params.token);
+    if (!review) throw notFound("review_not_found", "Review not found.");
+    const body = objectBody(request.body);
+    const result = await store.deleteComment(
+      review.id,
+      params.commentId,
+      requiredString(body.authorId, "authorId"),
+      body.expectedRevision === undefined ? undefined : numberParam(body.expectedRevision)
+    );
+    if (result === "conflict") throw httpError(409, "conflict", "Comment revision changed before delete.");
+    if (!result) throw httpError(403, "forbidden", "Only the original reviewer can delete this comment.");
+    return deletePayload(result);
+  });
+
   app.post("/r/:token/forks", async (request, reply) => {
     const review = await store.getReviewByPublicToken((request.params as Record<string, string>).token);
     if (!review) throw notFound("review_not_found", "Review not found.");
@@ -414,6 +468,14 @@ function resolvePayload(comment: ReviewComment) {
     resolvedBy: comment.resolvedBy ?? "",
     resolvedAt: comment.resolvedAt,
     resolutionNote: comment.resolutionNote,
+    remoteRevision: comment.remoteRevision,
+  };
+}
+
+function deletePayload(comment: ReviewComment) {
+  return {
+    deleted: true,
+    status: comment.status,
     remoteRevision: comment.remoteRevision,
   };
 }

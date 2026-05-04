@@ -10,6 +10,8 @@ enum ToolRegistry {
         "create_review",
         "stage_review_comment_resolution",
         "confirm_review_comment_resolution",
+        "close_review_comment",
+        "delete_review_comment",
         "publish_review_version"
     ]
 
@@ -121,7 +123,7 @@ enum ToolRegistry {
                     "type": .string("object"),
                     "additionalProperties": .bool(false),
                     "properties": .object(reviewFileProperties.merging([
-                        "status": .object(["type": .string("string"), "description": .string("Optional status filter such as open or resolved.")]),
+                        "status": .object(["type": .string("string"), "description": .string("Optional status filter such as open, closed, or resolved.")]),
                         "freshness": .object(["type": .string("string"), "enum": .array([.string("latest"), .string("cache")]), "description": .string("Default latest. Use cache to avoid network.")
                         ])
                     ]) { _, new in new })
@@ -158,6 +160,37 @@ enum ToolRegistry {
                         "confirm": .object(["type": .string("boolean")])
                     ]) { _, new in new }),
                     "required": .array([.string("comment_id"), .string("confirm")])
+                ]),
+                annotations: writeAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "close_review_comment",
+                description: "Close a review comment as intentionally not addressed. Closed comments are excluded from open-comment context.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties.merging([
+                        "comment_id": .object(["type": .string("string")]),
+                        "note": .object(["type": .string("string")]),
+                        "expected_revision": .object(["type": .string("integer")])
+                    ]) { _, new in new }),
+                    "required": .array([.string("comment_id")])
+                ]),
+                annotations: writeAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "delete_review_comment",
+                description: "Soft-delete a review comment from normal review reads. Use only when the user explicitly asks to remove a comment.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties.merging([
+                        "comment_id": .object(["type": .string("string")]),
+                        "expected_revision": .object(["type": .string("integer")])
+                    ]) { _, new in new }),
+                    "required": .array([.string("comment_id")])
                 ]),
                 annotations: writeAnnotations,
                 outputSchema: .object(["type": .string("object")])

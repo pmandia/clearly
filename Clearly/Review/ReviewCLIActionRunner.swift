@@ -24,17 +24,20 @@ enum ReviewCLIActionRunner {
         _ action: String,
         fileURL: URL,
         vaultRoot: URL,
-        bundleIdentifier: String?
+        bundleIdentifier: String?,
+        leadingArguments: [String] = [],
+        extraOptions: [String] = []
     ) async -> ReviewCLIActionResult {
         let args = [
             "review",
             action,
+        ] + leadingArguments + [
             fileURL.path,
             "--vault",
             vaultRoot.path,
             "--bundle-id",
             bundleIdentifier ?? "com.sabotage.clearly",
-        ]
+        ] + extraOptions
         return await run(arguments: args)
     }
 

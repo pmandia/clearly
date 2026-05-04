@@ -23,6 +23,8 @@ struct ReviewCommand: AsyncParsableCommand {
             ReviewSyncCommand.self,
             ReviewStageCommand.self,
             ReviewConfirmCommand.self,
+            ReviewCloseCommand.self,
+            ReviewDeleteCommand.self,
             ReviewPublishCommand.self,
             ReviewForksCommand.self,
             ReviewForkCommand.self,
@@ -112,6 +114,81 @@ struct ReviewConfirmCommand: AsyncParsableCommand {
     }
 }
 
+struct ReviewCloseCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "close",
+        abstract: "Close a review comment without marking it addressed."
+    )
+
+    @OptionGroup var globals: GlobalOptions
+
+    @Argument(help: "Review comment id to close.")
+    var commentId: String
+
+    @Argument(help: "Absolute path, vault-relative path, or vault:// URI. Omit to use the current Clearly document.")
+    var filePath: String?
+
+    @Option(help: "Close note.")
+    var note: String?
+
+    @Option(help: "Expected remote revision. If omitted, Clearly syncs and uses the latest revision.")
+    var expectedRevision: Int?
+
+    @Option(name: .customLong("in-vault"), help: "Optional vault disambiguator for relative file paths.")
+    var inVault: String?
+
+    func run() async throws {
+        try await runReviewCommand(globals: globals) { vaults in
+            try await closeReviewComment(
+                MutateReviewCommentArgs(
+                    filePath: filePath,
+                    commentId: commentId,
+                    note: note,
+                    expectedRevision: expectedRevision,
+                    vault: inVault
+                ),
+                vaults: vaults
+            )
+        }
+    }
+}
+
+struct ReviewDeleteCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "delete",
+        abstract: "Soft-delete a review comment."
+    )
+
+    @OptionGroup var globals: GlobalOptions
+
+    @Argument(help: "Review comment id to delete.")
+    var commentId: String
+
+    @Argument(help: "Absolute path, vault-relative path, or vault:// URI. Omit to use the current Clearly document.")
+    var filePath: String?
+
+    @Option(help: "Expected remote revision. If omitted, Clearly syncs and uses the latest revision.")
+    var expectedRevision: Int?
+
+    @Option(name: .customLong("in-vault"), help: "Optional vault disambiguator for relative file paths.")
+    var inVault: String?
+
+    func run() async throws {
+        try await runReviewCommand(globals: globals) { vaults in
+            try await deleteReviewComment(
+                MutateReviewCommentArgs(
+                    filePath: filePath,
+                    commentId: commentId,
+                    note: nil,
+                    expectedRevision: expectedRevision,
+                    vault: inVault
+                ),
+                vaults: vaults
+            )
+        }
+    }
+}
+
 struct ReviewCurrentCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "current",
@@ -186,7 +263,7 @@ struct ReviewCommentsCommand: AsyncParsableCommand {
     @Argument(help: "Absolute path, vault-relative path, or vault:// URI. Omit to use the current Clearly document.")
     var filePath: String?
 
-    @Option(help: "Filter by status, e.g. open or resolved.")
+    @Option(help: "Filter by status, e.g. open, closed, or resolved.")
     var status: String?
 
     @Option(help: "latest syncs first; cache reads comments-cache.json only.")

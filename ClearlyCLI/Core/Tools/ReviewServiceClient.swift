@@ -41,6 +41,12 @@ struct ReviewResolveResponse: Codable, Equatable {
     let remoteRevision: Int
 }
 
+struct ReviewDeleteResponse: Codable, Equatable {
+    let deleted: Bool
+    let status: String
+    let remoteRevision: Int
+}
+
 struct ReviewForkSummary: Codable, Equatable {
     let forkId: String
     let version: Int
@@ -105,6 +111,17 @@ private struct ReviewResolveRequest: Encodable {
     let expectedRevision: Int
     let resolvedBy: String
     let resolutionNote: String
+}
+
+private struct ReviewCloseRequest: Encodable {
+    let expectedRevision: Int
+    let closedBy: String
+    let resolutionNote: String
+}
+
+private struct ReviewDeleteRequest: Encodable {
+    let expectedRevision: Int
+    let deletedBy: String
 }
 
 struct ReviewServiceConfiguration {
@@ -329,6 +346,40 @@ final class ReviewServiceClient {
                 expectedRevision: expectedRevision,
                 resolvedBy: resolvedBy,
                 resolutionNote: note
+            )
+        )
+    }
+
+    func closeComment(
+        reviewId: String,
+        commentId: String,
+        expectedRevision: Int,
+        closedBy: String,
+        note: String
+    ) async throws -> ReviewResolveResponse {
+        try await request(
+            method: "POST",
+            path: ["api", "reviews", reviewId, "comments", commentId, "close"],
+            body: ReviewCloseRequest(
+                expectedRevision: expectedRevision,
+                closedBy: closedBy,
+                resolutionNote: note
+            )
+        )
+    }
+
+    func deleteComment(
+        reviewId: String,
+        commentId: String,
+        expectedRevision: Int,
+        deletedBy: String
+    ) async throws -> ReviewDeleteResponse {
+        try await request(
+            method: "DELETE",
+            path: ["api", "reviews", reviewId, "comments", commentId],
+            body: ReviewDeleteRequest(
+                expectedRevision: expectedRevision,
+                deletedBy: deletedBy
             )
         )
     }

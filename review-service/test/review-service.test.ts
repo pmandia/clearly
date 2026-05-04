@@ -122,9 +122,9 @@ test("creates a review, accepts public comments, and lets publisher resolve them
     method: "DELETE",
     url: `/api/reviews/${created.reviewId}/comments/${comment.id}`,
     headers: { authorization: `Bearer ${created.publicReviewToken}`, "content-type": "application/json" },
-    payload: { authorId: "gst_1" },
+    payload: { expectedRevision: 1, deletedBy: "publisher" },
   });
-  assert.equal(deleteResponse.statusCode, 404);
+  assert.equal(deleteResponse.statusCode, 403);
 
   const commentsResponse = await app.inject({
     method: "GET",
@@ -158,6 +158,64 @@ test("creates a review, accepts public comments, and lets publisher resolve them
     },
   });
   assert.equal(staleResolve.statusCode, 409);
+
+  const closeCommentResponse = await app.inject({
+    method: "POST",
+    url: `/r/${created.publicReviewToken}/comments`,
+    headers: { "content-type": "application/json" },
+    payload: {
+      version: 1,
+      author: { authorId: "gst_2", displayName: "Mina" },
+      body: "Probably not worth changing.",
+      selectedText: "launch date",
+      anchor: paragraphAnchor("launch date"),
+    },
+  });
+  assert.equal(closeCommentResponse.statusCode, 201, closeCommentResponse.body);
+  const closeComment = closeCommentResponse.json().comment;
+
+  const closed = await app.inject({
+    method: "POST",
+    url: `/api/reviews/${created.reviewId}/comments/${closeComment.id}/close`,
+    headers: { authorization: `Bearer ${created.accessToken}`, "content-type": "application/json" },
+    payload: {
+      expectedRevision: 1,
+      closedBy: "publisher",
+      resolutionNote: "Not addressing.",
+    },
+  });
+  assert.equal(closed.statusCode, 200, closed.body);
+  assert.equal(closed.json().status, "closed");
+
+  const deleteOwnResponse = await app.inject({
+    method: "POST",
+    url: `/r/${created.publicReviewToken}/comments`,
+    headers: { "content-type": "application/json" },
+    payload: {
+      version: 1,
+      author: { authorId: "gst_3", displayName: "Sam" },
+      body: "Typo in my comment.",
+      anchor: paragraphAnchor("launch date"),
+    },
+  });
+  assert.equal(deleteOwnResponse.statusCode, 201, deleteOwnResponse.body);
+  const ownComment = deleteOwnResponse.json().comment;
+  const deletedOwn = await app.inject({
+    method: "DELETE",
+    url: `/r/${created.publicReviewToken}/comments/${ownComment.id}`,
+    headers: { "content-type": "application/json" },
+    payload: { authorId: "gst_3", expectedRevision: 1 },
+  });
+  assert.equal(deletedOwn.statusCode, 200, deletedOwn.body);
+  assert.equal(deletedOwn.json().deleted, true);
+
+  const afterDelete = await app.inject({
+    method: "GET",
+    url: `/api/reviews/${created.reviewId}/comments`,
+    headers: { authorization: `Bearer ${created.accessToken}` },
+  });
+  assert.equal(afterDelete.statusCode, 200, afterDelete.body);
+  assert.equal(afterDelete.json().comments.some((item: { id: string }) => item.id === ownComment.id), false);
 });
 
 test("snapshot sanitizer preserves only the exact trusted wrapper style", () => {

@@ -71,6 +71,22 @@ struct ConfirmReviewResolutionArgs: Decodable {
     }
 }
 
+struct MutateReviewCommentArgs: Decodable {
+    let filePath: String?
+    let commentId: String
+    let note: String?
+    let expectedRevision: Int?
+    let vault: String?
+
+    init(filePath: String?, commentId: String, note: String?, expectedRevision: Int?, vault: String?) {
+        self.filePath = filePath
+        self.commentId = commentId
+        self.note = note
+        self.expectedRevision = expectedRevision
+        self.vault = vault
+    }
+}
+
 struct CurrentDocumentResult: Encodable {
     let appInstanceId: String
     let updatedAt: Date
@@ -124,6 +140,14 @@ struct StageReviewResolutionResult: Encodable {
     let resolutionNote: String?
     let anchorConfidence: ReviewAnchorConfidence?
     let anchorRemapReason: String?
+}
+
+struct ReviewCommentMutationResult: Encodable {
+    let review: ReviewContextResult
+    let commentId: String
+    let status: String
+    let remoteRevision: Int?
+    let syncedAt: Date?
 }
 
 struct ReviewToolErrorPayload: Encodable {
@@ -458,6 +482,90 @@ func confirmReviewCommentResolution(_ args: ConfirmReviewResolutionArgs, vaults:
         resolutionNote: result.response.resolutionNote,
         anchorConfidence: result.comment.anchorConfidence,
         anchorRemapReason: result.comment.anchorRemapReason
+    )
+}
+
+func closeReviewComment(_ args: MutateReviewCommentArgs, vaults: [LoadedVault]) async throws -> ReviewCommentMutationResult {
+    try await mutateRemoteComment(args, vaults: vaults) { client, reviewId, expectedRevision in
+        let response = try await client.closeComment(
+            reviewId: reviewId,
+            commentId: args.commentId,
+            expectedRevision: expectedRevision,
+            closedBy: "publisher",
+            note: args.note ?? "Closed without changes."
+        )
+        return (response.status, response.remoteRevision)
+    }
+}
+
+func deleteReviewComment(_ args: MutateReviewCommentArgs, vaults: [LoadedVault]) async throws -> ReviewCommentMutationResult {
+    try await mutateRemoteComment(args, vaults: vaults) { client, reviewId, expectedRevision in
+        let response = try await client.deleteComment(
+            reviewId: reviewId,
+            commentId: args.commentId,
+            expectedRevision: expectedRevision,
+            deletedBy: "publisher"
+        )
+        return (response.status, response.remoteRevision)
+    }
+}
+
+private func mutateRemoteComment(
+    _ args: MutateReviewCommentArgs,
+    vaults: [LoadedVault],
+    mutation: (ReviewServiceClient, String, Int) async throws -> (status: String, remoteRevision: Int?)
+) async throws -> ReviewCommentMutationResult {
+    let resolved = try resolveReviewFile(filePath: args.filePath, vaultHint: args.vault, vaults: vaults)
+    var context = try ReviewStateStore.context(
+        for: resolved.fileURL,
+        vaultRoot: resolved.vault.url,
+        bundleIdentifier: appBundleIdentifier(vaults: vaults)
+    )
+    guard let reviewId = context.reviewId else {
+        throw ToolError.reviewNotFound(context.vaultURI)
+    }
+    let client = try reviewServiceClient(context: context, vaults: vaults)
+    let expectedRevision: Int
+    if let provided = args.expectedRevision {
+        expectedRevision = provided
+    } else {
+        let synced = try await client.fetchAllComments(reviewId: reviewId)
+        try ReviewStateStore.writeCommentsCache(synced, context: context, bundleIdentifier: appBundleIdentifier(vaults: vaults))
+        guard let comment = synced.comments.first(where: { $0.id == args.commentId }),
+              let revision = comment.remoteRevision else {
+            throw ToolError.reviewNotFound("Comment \(args.commentId) was not found in the latest review sync.")
+        }
+        expectedRevision = revision
+    }
+
+    let mutationResult = try await mutation(client, reviewId, expectedRevision)
+    try await ReviewStateStore.withPendingResolutionsLock(
+        context: context,
+        bundleIdentifier: appBundleIdentifier(vaults: vaults)
+    ) {
+        var pending = try readPendingResolutions(context: context, vaults: vaults)
+        pending.pending.removeAll { $0.commentId == args.commentId }
+        pending.updatedAt = Date()
+        try ReviewStateStore.writePendingResolutions(
+            pending,
+            context: context,
+            bundleIdentifier: appBundleIdentifier(vaults: vaults)
+        )
+    }
+    let cache = try await client.fetchAllComments(reviewId: reviewId)
+    try ReviewStateStore.writeCommentsCache(cache, context: context, bundleIdentifier: appBundleIdentifier(vaults: vaults))
+    context = try ReviewStateStore.updateReviewRecord(
+        for: resolved.fileURL,
+        vaultRoot: resolved.vault.url,
+        bundleIdentifier: appBundleIdentifier(vaults: vaults),
+        syncedAt: cache.syncedAt
+    )
+    return ReviewCommentMutationResult(
+        review: ReviewContextResult(context),
+        commentId: args.commentId,
+        status: mutationResult.status,
+        remoteRevision: mutationResult.remoteRevision,
+        syncedAt: cache.syncedAt
     )
 }
 

@@ -285,18 +285,57 @@ export class PostgresReviewStore implements ReviewStore {
     return result.rows[0] ? mapComment(result.rows[0]) : undefined;
   }
 
-  async deleteComment(reviewId: string, commentId: string, authorId: string): Promise<boolean> {
+  async closeComment(reviewId: string, commentId: string, expectedRevision: number, closedBy: string, note = ""): Promise<ReviewComment | "conflict" | undefined> {
+    const existing = await this.pool.query("SELECT remote_revision FROM review_comments WHERE review_id = $1 AND id = $2 AND deleted_at IS NULL", [reviewId, commentId]);
+    if (!existing.rows[0]) return undefined;
+    if (Number(existing.rows[0].remote_revision) !== expectedRevision) return "conflict";
+    const result = await this.pool.query(
+      `UPDATE review_comments
+       SET status = 'closed',
+           resolved_by = $3,
+           resolved_at = now(),
+           resolution_note = $4,
+           remote_revision = remote_revision + 1,
+           updated_at = now()
+       WHERE review_id = $1 AND id = $2
+       RETURNING *`,
+      [reviewId, commentId, closedBy, note]
+    );
+    await this.logEvent(reviewId, "publisher", closedBy, "comment.closed", { commentId, note });
+    return mapComment(result.rows[0]);
+  }
+
+  async deleteComment(reviewId: string, commentId: string, authorId: string, expectedRevision?: number): Promise<ReviewComment | "conflict" | undefined> {
+    const existing = await this.pool.query(
+      "SELECT remote_revision FROM review_comments WHERE review_id = $1 AND id = $2 AND author_id = $3 AND deleted_at IS NULL",
+      [reviewId, commentId, authorId]
+    );
+    if (!existing.rows[0]) return undefined;
+    if (expectedRevision !== undefined && Number(existing.rows[0].remote_revision) !== expectedRevision) return "conflict";
     const result = await this.pool.query(
       `UPDATE review_comments
        SET deleted_at = now(), status = 'deleted', remote_revision = remote_revision + 1, updated_at = now()
-       WHERE review_id = $1 AND id = $2 AND author_id = $3 AND deleted_at IS NULL`,
+       WHERE review_id = $1 AND id = $2 AND author_id = $3 AND deleted_at IS NULL
+       RETURNING *`,
       [reviewId, commentId, authorId]
     );
-    if ((result.rowCount ?? 0) > 0) {
-      await this.logEvent(reviewId, "reviewer", authorId, "comment.deleted", { commentId });
-      return true;
-    }
-    return false;
+    await this.logEvent(reviewId, "reviewer", authorId, "comment.deleted", { commentId });
+    return mapComment(result.rows[0]);
+  }
+
+  async deleteCommentAsPublisher(reviewId: string, commentId: string, expectedRevision: number, deletedBy: string): Promise<ReviewComment | "conflict" | undefined> {
+    const existing = await this.pool.query("SELECT remote_revision FROM review_comments WHERE review_id = $1 AND id = $2 AND deleted_at IS NULL", [reviewId, commentId]);
+    if (!existing.rows[0]) return undefined;
+    if (Number(existing.rows[0].remote_revision) !== expectedRevision) return "conflict";
+    const result = await this.pool.query(
+      `UPDATE review_comments
+       SET deleted_at = now(), status = 'deleted', remote_revision = remote_revision + 1, updated_at = now()
+       WHERE review_id = $1 AND id = $2 AND deleted_at IS NULL
+       RETURNING *`,
+      [reviewId, commentId]
+    );
+    await this.logEvent(reviewId, "publisher", deletedBy, "comment.deleted", { commentId });
+    return mapComment(result.rows[0]);
   }
 
   async resolveComment(reviewId: string, commentId: string, expectedRevision: number, resolvedBy: string, note = ""): Promise<ReviewComment | "conflict" | undefined> {

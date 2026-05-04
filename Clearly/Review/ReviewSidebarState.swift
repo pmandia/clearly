@@ -3,6 +3,7 @@ import ClearlyCore
 
 enum ReviewCommentsFilter: String, CaseIterable, Identifiable {
     case open
+    case closed
     case resolved
     case all
 
@@ -11,6 +12,7 @@ enum ReviewCommentsFilter: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .open: return "Open"
+        case .closed: return "Closed"
         case .resolved: return "Resolved"
         case .all: return "All"
         }
@@ -40,11 +42,13 @@ final class ReviewSidebarState {
         let filtered: [ReviewComment]
         switch filter {
         case .open:
-            filtered = comments.filter { $0.status != "resolved" }
+            filtered = comments.filter { $0.status == "open" || $0.status.isEmpty }
+        case .closed:
+            filtered = comments.filter { $0.status == "closed" }
         case .resolved:
             filtered = comments.filter { $0.status == "resolved" }
         case .all:
-            filtered = comments
+            filtered = comments.filter { $0.status != "deleted" }
         }
         return filtered.sorted { lhs, rhs in
             let lhsDate = lhs.updatedAt ?? lhs.createdAt ?? .distantPast
@@ -115,6 +119,49 @@ final class ReviewSidebarState {
 
     func publishCurrentVersion() {
         runRemoteAction("publish")
+    }
+
+    func closeComment(_ comment: ReviewComment) {
+        runCommentAction("close", comment: comment, note: "Closed without changes.")
+    }
+
+    func deleteComment(_ comment: ReviewComment) {
+        runCommentAction("delete", comment: comment, note: nil)
+    }
+
+    private func runCommentAction(_ action: String, comment: ReviewComment, note: String?) {
+        guard let activeFileURL, let activeVaultRoot else { return }
+        isBusy = true
+        lastActionMessage = nil
+        lastError = nil
+
+        var options: [String] = []
+        if let revision = comment.remoteRevision {
+            options += ["--expected-revision", "\(revision)"]
+        }
+        if let note, !note.isEmpty {
+            options += ["--note", note]
+        }
+
+        Task {
+            let result = await ReviewCLIActionRunner.runReviewAction(
+                action,
+                fileURL: activeFileURL,
+                vaultRoot: activeVaultRoot,
+                bundleIdentifier: Bundle.main.bundleIdentifier,
+                leadingArguments: [comment.id],
+                extraOptions: options
+            )
+            await MainActor.run {
+                isBusy = false
+                if result.succeeded {
+                    lastActionMessage = action == "delete" ? "Comment deleted." : "Comment closed."
+                    reload(fileURL: activeFileURL, vaultRoot: activeVaultRoot)
+                } else {
+                    lastError = result.displayMessage
+                }
+            }
+        }
     }
 
     private func runRemoteAction(_ action: String) {

@@ -83,6 +83,36 @@ enum Handlers {
                 return try await confirmReviewCommentResolution(args, vaults: vaults)
             }
 
+        case "close_review_comment":
+            return await structuredCall {
+                let args = MutateReviewCommentArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    commentId: params.arguments?["comment_id"]?.stringValue ?? "",
+                    note: params.arguments?["note"]?.stringValue,
+                    expectedRevision: params.arguments?["expected_revision"]?.intValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                guard !args.commentId.isEmpty else {
+                    throw ToolError.missingArgument("comment_id")
+                }
+                return try await closeReviewComment(args, vaults: vaults)
+            }
+
+        case "delete_review_comment":
+            return await structuredCall {
+                let args = MutateReviewCommentArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    commentId: params.arguments?["comment_id"]?.stringValue ?? "",
+                    note: nil,
+                    expectedRevision: params.arguments?["expected_revision"]?.intValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                guard !args.commentId.isEmpty else {
+                    throw ToolError.missingArgument("comment_id")
+                }
+                return try await deleteReviewComment(args, vaults: vaults)
+            }
+
         case "publish_review_version":
             return await structuredCall {
                 let args = ReviewFileArgs(
