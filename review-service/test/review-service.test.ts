@@ -60,6 +60,10 @@ test("creates a review, accepts public comments, and lets publisher resolve them
   const page = await app.inject({ method: "GET", url: `/r/${created.publicReviewToken}` });
   assert.equal(page.statusCode, 200);
   assert.match(page.body, /Clearly Review/);
+  assert.match(page.body, /data-role="review-composer"/);
+  assert.match(page.body, /Comment on selected text/);
+  assert.match(page.body, /selection-popover/);
+  assert.doesNotMatch(page.body, /Use Selection/);
 
   const snapshot = await app.inject({ method: "GET", url: `/r/${created.publicReviewToken}/snapshot/1` });
   assert.equal(snapshot.statusCode, 200, snapshot.body);
