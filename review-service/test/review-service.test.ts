@@ -62,7 +62,9 @@ test("creates a review, accepts public comments, and lets publisher resolve them
   assert.match(page.body, /Clearly Review/);
   assert.match(page.body, /data-role="review-composer"/);
   assert.match(page.body, /New comment/);
-  assert.match(page.body, /selection-popover/);
+  assert.match(page.body, /mark\[data-review-highlight\]/);
+  assert.match(page.body, /function scrollToCommentAnchor/);
+  assert.doesNotMatch(page.body, /selection-popover/);
   assert.doesNotMatch(page.body, /Use Selection/);
 
   const snapshot = await app.inject({ method: "GET", url: `/r/${created.publicReviewToken}/snapshot/1` });

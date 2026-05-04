@@ -80,24 +80,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       border: 0;
       background: white;
     }
-    .selection-popover {
-      position: fixed;
-      z-index: 20;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 7px 10px;
-      border: 1px solid #1d4fb8;
-      border-radius: 999px;
-      background: var(--accent);
-      color: white;
-      font-size: 13px;
-      font-weight: 600;
-      box-shadow: 0 12px 28px rgba(27, 32, 38, 0.22);
-      transform: translate(-50%, -100%);
-    }
-    .selection-popover[hidden] { display: none; }
-
     .review-pane {
       display: flex;
       flex-direction: column;
@@ -381,7 +363,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
   <main class="shell" data-token="${escapeHtml(token)}" data-version="${latestVersion.version}">
     <section class="document-pane">
       <iframe class="doc" id="snapshot" title="Review snapshot" sandbox="allow-same-origin" src="/r/${encodeURIComponent(token)}/snapshot/${latestVersion.version}"></iframe>
-      <button class="selection-popover" id="selection-popover" type="button" hidden>Comment</button>
     </section>
 
     <aside class="review-pane" aria-label="Review comments">
@@ -448,7 +429,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     const root = document.querySelector(".shell");
     const token = root.dataset.token;
     const frame = document.getElementById("snapshot");
-    const selectionPopover = document.getElementById("selection-popover");
     const selectedBox = document.getElementById("selected");
     const selectionStateLabel = document.getElementById("selection-state-label");
     const postButton = document.getElementById("post-comment");
@@ -476,10 +456,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       bindSnapshotSelection();
     });
     frame.addEventListener("mouseup", () => setTimeout(captureSelectionFromFrame, 0));
-    selectionPopover.addEventListener("click", () => {
-      selectionPopover.hidden = true;
-      bodyInput.focus();
-    });
     document.getElementById("comment-form").addEventListener("submit", postComment);
     document.getElementById("clear-selection").addEventListener("click", () => clearSelection(true));
     document.getElementById("refresh-comments").addEventListener("click", loadComments);
@@ -529,7 +505,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       const doc = snapshotDocument();
       const selection = frame.contentWindow && frame.contentWindow.getSelection ? frame.contentWindow.getSelection() : null;
       if (!doc || !selection || !selection.rangeCount || selection.isCollapsed) {
-        selectionPopover.hidden = true;
         return false;
       }
 
@@ -537,7 +512,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       const rawSelection = range.toString();
       const trimmed = rawSelection.trim();
       if (!trimmed) {
-        selectionPopover.hidden = true;
         return false;
       }
 
@@ -550,7 +524,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       selectedText = trimmed;
       selectedAnchor = buildAnchor(block, blockText, offset, trimmed);
       renderSelectedText();
-      positionSelectionPopover(range);
       updateComposerState();
       return true;
     }
@@ -620,18 +593,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       return "";
     }
 
-    function positionSelectionPopover(range) {
-      const rect = range.getBoundingClientRect();
-      const frameRect = frame.getBoundingClientRect();
-      if (!rect || (!rect.width && !rect.height)) {
-        selectionPopover.hidden = true;
-        return;
-      }
-      selectionPopover.style.left = (frameRect.left + rect.left + rect.width / 2) + "px";
-      selectionPopover.style.top = Math.max(48, frameRect.top + rect.top - 8) + "px";
-      selectionPopover.hidden = false;
-    }
-
     function renderSelectedText() {
       selectedBox.classList.toggle("has-selection", Boolean(selectedText));
       selectionStateLabel.textContent = selectedText ? "Attached to selection" : "General comment";
@@ -644,7 +605,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     function clearSelection(clearFrameSelection) {
       selectedText = "";
       selectedAnchor = null;
-      selectionPopover.hidden = true;
       if (clearFrameSelection) {
         const selection = frame.contentWindow && frame.contentWindow.getSelection ? frame.contentWindow.getSelection() : null;
         if (selection) selection.removeAllRanges();
@@ -861,13 +821,39 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
 
     function highlightComment(doc, comment) {
       const id = comment.id || comment.commentId;
-      const anchor = comment.currentAnchor || comment.anchor || {};
+      const target = commentTarget(doc, comment);
+      if (!target) return;
+      if (target.text && target.offset >= 0 && wrapTextRange(doc, target.block, target.offset, target.text.length, id)) return;
+      target.block.classList.add("clearly-review-block-highlight");
+    }
+
+    function commentTarget(doc, comment) {
+      const anchor = commentAnchor(comment);
+      const text = textForComment(comment, anchor);
       const block = blockForAnchor(doc, anchor);
-      if (!block) return;
-      const text = comment.selectedText || anchor.selectedText || "";
-      const offset = Number.isFinite(anchor.charOffsetInBlock) ? anchor.charOffsetInBlock : block.textContent.indexOf(text);
-      if (text && offset >= 0 && wrapTextRange(doc, block, offset, text.length, id)) return;
-      block.classList.add("clearly-review-block-highlight");
+      if (block) {
+        const anchorOffset = Number.isFinite(anchor.charOffsetInBlock) ? anchor.charOffsetInBlock : -1;
+        const textOffset = text ? (block.textContent || "").indexOf(text) : -1;
+        return { block, text, offset: anchorOffset >= 0 ? anchorOffset : textOffset };
+      }
+      return text ? findTextInDocument(doc, text) : null;
+    }
+
+    function commentAnchor(comment) {
+      return comment.currentAnchor || comment.anchor || {};
+    }
+
+    function textForComment(comment, anchor) {
+      return String(comment.selectedText || anchor.selectedText || "").trim();
+    }
+
+    function findTextInDocument(doc, text) {
+      const blocks = Array.from(doc.querySelectorAll("[data-sourcepos], p, li, blockquote, pre, td, th, h1, h2, h3, h4, h5, h6"));
+      for (const block of blocks) {
+        const offset = (block.textContent || "").indexOf(text);
+        if (offset >= 0) return { block, text, offset };
+      }
+      return null;
     }
 
     function blockForAnchor(doc, anchor) {
@@ -885,7 +871,8 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
 
     function wrapTextRange(doc, rootNode, start, length, commentId) {
       const end = start + length;
-      const walker = doc.createTreeWalker(rootNode, NodeFilter.SHOW_TEXT);
+      const textFilter = doc.defaultView && doc.defaultView.NodeFilter ? doc.defaultView.NodeFilter.SHOW_TEXT : NodeFilter.SHOW_TEXT;
+      const walker = doc.createTreeWalker(rootNode, textFilter);
       const nodes = [];
       let position = 0;
       let node;
@@ -916,8 +903,9 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     function scrollToCommentAnchor(commentId) {
       const doc = snapshotDocument();
       if (!doc) return;
+      const comment = commentsCache.find(item => (item.id || item.commentId) === commentId);
       const target = findHighlightMark(doc, commentId) ||
-        blockForAnchor(doc, (commentsCache.find(comment => (comment.id || comment.commentId) === commentId) || {}).currentAnchor || {});
+        (comment ? commentTarget(doc, comment)?.block : null);
       if (target && target.scrollIntoView) target.scrollIntoView({ block: "center", behavior: "smooth" });
     }
 
