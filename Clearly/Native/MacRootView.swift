@@ -22,6 +22,7 @@ struct MacRootView: View {
     @State private var wikiChat = WikiChatState()
     @State private var wikiLog = WikiLogState()
     @State private var wikiCapture = WikiCaptureState()
+    @State private var reviewSidebar = ReviewSidebarState()
 
     var body: some View {
         if workspace.isFirstRun && workspace.locations.isEmpty && workspace.activeDocumentID == nil {
@@ -56,6 +57,7 @@ struct MacRootView: View {
                     wikiChat: wikiChat,
                     wikiLog: wikiLog,
                     wikiCapture: wikiCapture,
+                    reviewSidebar: reviewSidebar,
                     positionSyncID: $positionSyncID,
                     showFormatPopover: $showFormatPopover
                 )
@@ -67,6 +69,7 @@ struct MacRootView: View {
                     outlineState: outlineState,
                     backlinksState: backlinksState,
                     wikiController: wikiController,
+                    reviewSidebar: reviewSidebar,
                     showFormatPopover: $showFormatPopover
                 )
             }

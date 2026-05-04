@@ -46,7 +46,7 @@ final class TestVaultHarness {
         let index = try VaultIndex(locationURL: vaultURL, bundleIdentifier: bundleID)
         index.indexAllFiles()
 
-        self.loadedVaults = [LoadedVault(index: index, url: vaultURL)]
+        self.loadedVaults = [LoadedVault(index: index, url: vaultURL, bundleIdentifier: bundleID)]
 
         // Build the MCP pair
         let (clientTransport, serverTransport) = await InMemoryTransport.createConnectedPair()

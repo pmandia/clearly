@@ -19,6 +19,7 @@ extension Notification.Name {
     static let wikiCapture = Notification.Name("wikiCapture")
     static let wikiChat = Notification.Name("wikiChat")
     static let wikiToggleLogSidebar = Notification.Name("wikiToggleLogSidebar")
+    static let reviewToggleSidebar = Notification.Name("reviewToggleSidebar")
 }
 
 // MARK: - Focused values

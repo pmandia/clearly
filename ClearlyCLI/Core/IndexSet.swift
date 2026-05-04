@@ -4,6 +4,13 @@ import ClearlyCore
 struct LoadedVault {
     let index: VaultIndex
     let url: URL
+    let bundleIdentifier: String
+
+    init(index: VaultIndex, url: URL, bundleIdentifier: String = "com.sabotage.clearly") {
+        self.index = index
+        self.url = url
+        self.bundleIdentifier = bundleIdentifier
+    }
 }
 
 enum IndexSetError: Error {
@@ -35,7 +42,7 @@ enum IndexSet {
             let url = URL(fileURLWithPath: path)
             do {
                 let index = try VaultIndex(locationURL: url, bundleIdentifier: opts.bundleID)
-                loaded.append(LoadedVault(index: index, url: url))
+                loaded.append(LoadedVault(index: index, url: url, bundleIdentifier: opts.bundleID))
             } catch {
                 FileHandle.standardError.write(
                     Data("Warning: Cannot open index for \(path): \(error)\n".utf8)

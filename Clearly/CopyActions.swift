@@ -37,6 +37,40 @@ enum CopyActions {
         pb.setString("[[\(target)]]", forType: .string)
     }
 
+    static func copyReviewLink(_ url: URL, vaultRoot: URL) {
+        let text: String
+        do {
+            let context = try ReviewStateStore.context(for: url, vaultRoot: vaultRoot)
+            text = context.reviewUrl ?? "No review link exists yet for \(context.vaultURI). Use Share for Review after the review service is configured."
+        } catch {
+            text = "Unable to resolve review link for \(url.path): \(error)"
+        }
+        copyString(text)
+    }
+
+    static func copyReviewPrompt(_ url: URL, vaultRoot: URL) {
+        let text: String
+        do {
+            let context = try ReviewStateStore.context(for: url, vaultRoot: vaultRoot)
+            text = reviewPrompt(for: context)
+        } catch {
+            text = "Use the Clearly MCP server to fetch the latest open review comments for:\n\(url.path)\n\nAddress the comments with minimal edits, preserve the author's voice, and summarize what changed.\n\nClearly could not resolve a vault review context: \(error)"
+        }
+        copyString(text)
+    }
+
+    static func copyReviewContextPath(_ url: URL, vaultRoot: URL) {
+        let text: String
+        do {
+            let context = try ReviewStateStore.context(for: url, vaultRoot: vaultRoot)
+            let contextURL = try ReviewStateStore.writeContextPayload(context)
+            text = contextURL.path
+        } catch {
+            text = "Unable to write review context for \(url.path): \(error)"
+        }
+        copyString(text)
+    }
+
     static func copyMarkdown(_ text: String) {
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -80,6 +114,30 @@ enum CopyActions {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(plain, forType: .string)
+    }
+
+    private static func copyString(_ text: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+    }
+
+    private static func reviewPrompt(for context: ReviewContextPayload) -> String {
+        var lines: [String] = [
+            "Use the Clearly MCP server to fetch the latest open review comments for:",
+            context.vaultURI,
+            "",
+            "Local fallback path:",
+            context.targetAbsolutePath,
+            "",
+            "Address the comments with minimal edits, preserve the author's voice, and summarize what changed.",
+            "Stage proposed comment resolutions, but do not confirm remote resolution until I review the diff."
+        ]
+        if context.reviewId == nil {
+            lines.append("")
+            lines.append("No hosted review is linked yet in Clearly ReviewState; if MCP reports review_not_found, create or sync a review for this document first.")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Reads markdown content from a file URL, using security-scoped access if needed.
@@ -133,6 +191,9 @@ enum CopyActions {
 @objc protocol CopyMenuActions {
     func copyFilePathAction(_ sender: NSMenuItem)
     func copyFileNameAction(_ sender: NSMenuItem)
+    func copyReviewLinkAction(_ sender: NSMenuItem)
+    func copyReviewPromptAction(_ sender: NSMenuItem)
+    func copyReviewContextPathAction(_ sender: NSMenuItem)
     func copyMarkdownAction(_ sender: NSMenuItem)
     func copyHTMLAction(_ sender: NSMenuItem)
     func copyRichTextAction(_ sender: NSMenuItem)

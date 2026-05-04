@@ -9,6 +9,112 @@ enum Handlers {
         }
 
         switch params.name {
+        case "get_current_document":
+            return await structuredCall {
+                return try await getCurrentDocument(vaults: vaults)
+            }
+
+        case "get_review_for_file":
+            return await structuredCall {
+                let args = ReviewFileArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                return try await getReviewForFile(args, vaults: vaults)
+            }
+
+        case "sync_review_comments":
+            return await structuredCall {
+                let args = ReviewFileArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                return try await syncReviewComments(args, vaults: vaults)
+            }
+
+        case "create_review":
+            return await structuredCall {
+                let args = ReviewFileArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                return try await createReview(args, vaults: vaults)
+            }
+
+        case "get_review_comments":
+            return await structuredCall {
+                let args = ReviewCommentsArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    status: params.arguments?["status"]?.stringValue,
+                    freshness: params.arguments?["freshness"]?.stringValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                return try await getReviewComments(args, vaults: vaults)
+            }
+
+        case "stage_review_comment_resolution":
+            return await structuredCall {
+                let args = StageReviewResolutionArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    commentId: params.arguments?["comment_id"]?.stringValue ?? "",
+                    note: params.arguments?["note"]?.stringValue,
+                    remoteRevision: params.arguments?["remote_revision"]?.intValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                guard !args.commentId.isEmpty else {
+                    throw ToolError.missingArgument("comment_id")
+                }
+                return try await stageReviewCommentResolution(args, vaults: vaults)
+            }
+
+        case "confirm_review_comment_resolution":
+            return await structuredCall {
+                let args = ConfirmReviewResolutionArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    commentId: params.arguments?["comment_id"]?.stringValue ?? "",
+                    note: params.arguments?["note"]?.stringValue,
+                    expectedRevision: params.arguments?["expected_revision"]?.intValue,
+                    confirm: params.arguments?["confirm"]?.boolValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                guard !args.commentId.isEmpty else {
+                    throw ToolError.missingArgument("comment_id")
+                }
+                return try await confirmReviewCommentResolution(args, vaults: vaults)
+            }
+
+        case "publish_review_version":
+            return await structuredCall {
+                let args = ReviewFileArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                return try await publishReviewVersion(args, vaults: vaults)
+            }
+
+        case "get_review_forks":
+            return await structuredCall {
+                let args = ReviewFileArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                return try await getReviewForks(args, vaults: vaults)
+            }
+
+        case "get_review_fork":
+            return await structuredCall {
+                let forkId = params.arguments?["fork_id"]?.stringValue ?? ""
+                guard !forkId.isEmpty else {
+                    throw ToolError.missingArgument("fork_id")
+                }
+                let args = ReviewForkArgs(
+                    filePath: params.arguments?["file_path"]?.stringValue,
+                    forkId: forkId,
+                    vault: params.arguments?["vault"]?.stringValue
+                )
+                return try await getReviewFork(args, vaults: vaults)
+            }
+
         case "semantic_search":
             return await structuredCall {
                 let args = SemanticSearchArgs(
@@ -196,6 +302,10 @@ private extension Value {
     var intValue: Int? {
         if case .int(let n) = self { return n }
         if case .double(let d) = self { return Int(d) }
+        return nil
+    }
+    var boolValue: Bool? {
+        if case .bool(let value) = self { return value }
         return nil
     }
 }

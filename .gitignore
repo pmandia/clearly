@@ -13,4 +13,6 @@ ClearlyWYSIWYGWeb/node_modules/
 ClearlyWYSIWYGWeb/perf/dist/
 ClearlyWYSIWYGWeb/perf/fixtures/
 ClearlyWYSIWYGWeb/test/dist/
+review-service/node_modules/
+review-service/dist/
 Packages/ClearlyCore/Package.resolved

@@ -23,14 +23,18 @@ final class MCPIntegrationTests: XCTestCase {
 
     func testListToolsReturnsAllRegisteredTools() async throws {
         let (tools, _) = try await harness.client.listTools()
-        XCTAssertEqual(tools.count, 12)
         let names = Set(tools.map(\.name))
         XCTAssertEqual(names, Set([
+            "get_current_document", "get_review_for_file", "sync_review_comments",
+            "create_review", "get_review_comments", "stage_review_comment_resolution",
+            "confirm_review_comment_resolution", "publish_review_version", "get_review_forks",
+            "get_review_fork",
             "semantic_search", "find_related",
             "search_notes", "get_backlinks", "get_tags",
             "read_note", "list_notes", "get_headings",
             "get_frontmatter", "create_note", "update_note", "move_note"
         ]))
+        XCTAssertEqual(tools.count, names.count)
         // Every tool advertises an outputSchema.
         for t in tools {
             XCTAssertNotNil(t.outputSchema, "\(t.name) missing outputSchema")
@@ -41,13 +45,23 @@ final class MCPIntegrationTests: XCTestCase {
     func testReadOnlyToolRegistryHidesWriteTools() throws {
         let tools = ToolRegistry.listTools(vaults: harness.loadedVaults, readOnly: true)
         let names = Set(tools.map(\.name))
-        XCTAssertEqual(tools.count, 9)
         XCTAssertFalse(names.contains("create_note"))
         XCTAssertFalse(names.contains("update_note"))
         XCTAssertFalse(names.contains("move_note"))
+        XCTAssertFalse(names.contains("create_review"))
+        XCTAssertFalse(names.contains("stage_review_comment_resolution"))
+        XCTAssertFalse(names.contains("confirm_review_comment_resolution"))
+        XCTAssertFalse(names.contains("publish_review_version"))
+        XCTAssertTrue(names.contains("get_current_document"))
+        XCTAssertTrue(names.contains("get_review_for_file"))
+        XCTAssertTrue(names.contains("sync_review_comments"))
+        XCTAssertTrue(names.contains("get_review_comments"))
+        XCTAssertTrue(names.contains("get_review_forks"))
+        XCTAssertTrue(names.contains("get_review_fork"))
         XCTAssertTrue(names.contains("semantic_search"))
         XCTAssertTrue(names.contains("find_related"))
         XCTAssertTrue(names.contains("search_notes"))
+        XCTAssertEqual(tools.count, names.count)
     }
 
     func testReadOnlyHandlerRejectsWriteTools() async throws {
@@ -68,6 +82,127 @@ final class MCPIntegrationTests: XCTestCase {
         let payload = try JSONDecoder().decode(ErrorPayload.self, from: Data(jsonString.utf8))
         XCTAssertEqual(payload.error, "unknown_tool")
         XCTAssertFalse(FileManager.default.fileExists(atPath: harness.vaultURL.appendingPathComponent("blocked.md").path))
+    }
+
+    // MARK: - review tools
+
+    func testGetReviewForFileResolvesVaultURI() async throws {
+        struct Result: Decodable {
+            let vaultId: String
+            let targetRelativePath: String
+            let vaultUri: String
+            let hasLinkedReview: Bool
+        }
+
+        let result = try await harness.callTool(
+            "get_review_for_file",
+            arguments: ["file_path": .string("Projects/Plan.md")],
+            as: Result.self
+        )
+
+        XCTAssertEqual(result.targetRelativePath, "Projects/Plan.md")
+        XCTAssertTrue(result.vaultUri.hasPrefix("vault://\(result.vaultId)/Projects/Plan.md"))
+        XCTAssertFalse(result.hasLinkedReview)
+    }
+
+    func testGetReviewCommentsReadsLocalCache() async throws {
+        let context = try linkedReviewContext(relativePath: "Projects/Plan.md")
+        let cache = ReviewCommentsCache(
+            reviewId: "rvw_test",
+            remoteRevision: "rev_1",
+            syncedAt: Date(),
+            freshness: "cache",
+            comments: [
+                ReviewComment(
+                    id: "c_1",
+                    reviewId: "rvw_test",
+                    version: 1,
+                    status: "open",
+                    author: "Jane",
+                    authorId: "guest_1",
+                    body: "Needs a concrete example.",
+                    selectedText: "project plan",
+                    anchor: .paragraph(ReviewTextAnchor(
+                        sourcepos: "1:1-1:14",
+                        headingId: "plan",
+                        selectedText: "project plan"
+                    )),
+                    remoteRevision: 3
+                )
+            ]
+        )
+        try ReviewStateStore.writeCommentsCache(cache, context: context, bundleIdentifier: harness.bundleID)
+
+        struct Result: Decodable {
+            let freshness: String
+            let comments: [ReviewComment]
+            let pendingResolutionCount: Int
+        }
+        let result = try await harness.callTool(
+            "get_review_comments",
+            arguments: [
+                "file_path": .string(context.vaultURI),
+                "freshness": .string("cache"),
+                "status": .string("open")
+            ],
+            as: Result.self
+        )
+
+        XCTAssertEqual(result.freshness, "cache")
+        XCTAssertEqual(result.comments.map(\.id), ["c_1"])
+        XCTAssertEqual(result.comments.first?.anchor.blockType, .paragraph)
+        XCTAssertEqual(result.pendingResolutionCount, 0)
+    }
+
+    func testStageReviewCommentResolutionWritesPendingState() async throws {
+        let context = try linkedReviewContext(relativePath: "Projects/Plan.md")
+
+        struct Result: Decodable {
+            let commentId: String
+            let staged: Bool
+            let pendingResolutionCount: Int
+        }
+        let result = try await harness.callTool(
+            "stage_review_comment_resolution",
+            arguments: [
+                "file_path": .string(context.vaultURI),
+                "comment_id": .string("c_1"),
+                "note": .string("Addressed with a concrete example."),
+                "remote_revision": .int(3)
+            ],
+            as: Result.self
+        )
+
+        XCTAssertEqual(result.commentId, "c_1")
+        XCTAssertTrue(result.staged)
+        XCTAssertEqual(result.pendingResolutionCount, 1)
+    }
+
+    func testSyncReviewCommentsRequiresConfiguredService() async throws {
+        guard ProcessInfo.processInfo.environment["CLEARLY_REVIEW_API_BASE_URL"] == nil else {
+            throw XCTSkip("Review service is configured in this environment")
+        }
+        let context = try linkedReviewContext(relativePath: "Projects/Plan.md")
+
+        let error = try await harness.callToolExpectingError(
+            "sync_review_comments",
+            arguments: ["file_path": .string(context.vaultURI)]
+        )
+
+        XCTAssertEqual(error.error, "service_unavailable")
+    }
+
+    func testCreateReviewRequiresConfiguredService() async throws {
+        guard ProcessInfo.processInfo.environment["CLEARLY_REVIEW_API_BASE_URL"] == nil else {
+            throw XCTSkip("Review service is configured in this environment")
+        }
+
+        let error = try await harness.callToolExpectingError(
+            "create_review",
+            arguments: ["file_path": .string("Projects/Plan.md")]
+        )
+
+        XCTAssertEqual(error.error, "service_unavailable")
     }
 
     // MARK: - search_notes
@@ -233,6 +368,25 @@ final class MCPIntegrationTests: XCTestCase {
                 )
             ],
             modelVersion: modelVersion
+        )
+    }
+
+    private func linkedReviewContext(relativePath: String) throws -> ReviewContextPayload {
+        let fileURL = harness.vaultURL.appendingPathComponent(relativePath)
+        _ = try ReviewStateStore.context(
+            for: fileURL,
+            vaultRoot: harness.vaultURL,
+            bundleIdentifier: harness.bundleID
+        )
+        return try ReviewStateStore.updateReviewRecord(
+            for: fileURL,
+            vaultRoot: harness.vaultURL,
+            bundleIdentifier: harness.bundleID,
+            reviewId: "rvw_test",
+            publisherId: "pub_test",
+            keychainAccount: "clearly-review-publisher-pub_test",
+            reviewUrl: "https://reviews.example.com/r/prt_test",
+            latestVersion: 1
         )
     }
 

@@ -12,6 +12,18 @@ enum ToolError: Error, LocalizedError {
     /// On-disk content hash didn't match the caller's `expected_content_hash`.
     /// The agent should re-read the note and retry the write with a fresh hash.
     case staleContent(relativePath: String, expected: String, actual: String)
+    case reviewNotFound(String)
+    case staleCurrentDocument
+    case networkUnreachable(String)
+    case unauthenticated(String)
+    case forbidden(String)
+    case reviewTargetMissing(String)
+    case fileUnreadable(String)
+    case remoteRevisionConflict(String)
+    case schemaVersionUnsupported(String)
+    case payloadTooLarge(String)
+    case rateLimited(String)
+    case serviceUnavailable(String)
 
     // Exact text the MCP adapter emits in the `.text` content block. Preserves
     // byte-for-byte parity with the pre-refactor handler output — notably,
@@ -34,6 +46,30 @@ enum ToolError: Error, LocalizedError {
             return "Note already exists: \(path)\nUse update_note to modify existing notes."
         case .staleContent(let path, let expected, let actual):
             return "Note has changed on disk since you last read it: \(path) (expected hash \(expected), actual \(actual)). Re-read the note and retry."
+        case .reviewNotFound(let path):
+            return "No review is linked to: \(path)"
+        case .staleCurrentDocument:
+            return "Clearly current document state is stale. Pass file_path explicitly."
+        case .networkUnreachable(let message):
+            return "Review service is unreachable: \(message)"
+        case .unauthenticated(let message):
+            return "Review service is not authenticated: \(message)"
+        case .forbidden(let message):
+            return "Review action is forbidden: \(message)"
+        case .reviewTargetMissing(let path):
+            return "Review target is missing: \(path)"
+        case .fileUnreadable(let path):
+            return "File is unreadable: \(path)"
+        case .remoteRevisionConflict(let message):
+            return "Remote review comment changed: \(message)"
+        case .schemaVersionUnsupported(let message):
+            return "Review schema version is unsupported: \(message)"
+        case .payloadTooLarge(let message):
+            return "Review payload is too large: \(message)"
+        case .rateLimited(let message):
+            return "Review service rate limit hit: \(message)"
+        case .serviceUnavailable(let message):
+            return "Review service is unavailable: \(message)"
         }
     }
 }
@@ -90,6 +126,65 @@ extension ToolError {
             payload["relative_path"] = path
             payload["expected_content_hash"] = expected
             payload["actual_content_hash"] = actual
+        case .reviewNotFound(let path):
+            code = 6
+            payload["error"] = "review_not_found"
+            payload["message"] = errorDescription ?? ""
+            payload["file_path"] = path
+        case .staleCurrentDocument:
+            code = 6
+            payload["error"] = "stale_current_document"
+            payload["message"] = errorDescription ?? ""
+        case .networkUnreachable(let message):
+            code = 7
+            payload["error"] = "network_unreachable"
+            payload["message"] = errorDescription ?? ""
+            payload["details"] = message
+        case .unauthenticated(let message):
+            code = 7
+            payload["error"] = "unauthenticated"
+            payload["message"] = errorDescription ?? ""
+            payload["details"] = message
+        case .forbidden(let message):
+            code = 7
+            payload["error"] = "forbidden"
+            payload["message"] = errorDescription ?? ""
+            payload["details"] = message
+        case .reviewTargetMissing(let path):
+            code = 6
+            payload["error"] = "review_target_missing"
+            payload["message"] = errorDescription ?? ""
+            payload["file_path"] = path
+        case .fileUnreadable(let path):
+            code = 6
+            payload["error"] = "file_unreadable"
+            payload["message"] = errorDescription ?? ""
+            payload["file_path"] = path
+        case .remoteRevisionConflict(let message):
+            code = 8
+            payload["error"] = "remote_revision_conflict"
+            payload["message"] = errorDescription ?? ""
+            payload["details"] = message
+        case .schemaVersionUnsupported(let message):
+            code = 8
+            payload["error"] = "schema_version_unsupported"
+            payload["message"] = errorDescription ?? ""
+            payload["details"] = message
+        case .payloadTooLarge(let message):
+            code = 8
+            payload["error"] = "payload_too_large"
+            payload["message"] = errorDescription ?? ""
+            payload["details"] = message
+        case .rateLimited(let message):
+            code = 8
+            payload["error"] = "rate_limited"
+            payload["message"] = errorDescription ?? ""
+            payload["details"] = message
+        case .serviceUnavailable(let message):
+            code = 7
+            payload["error"] = "service_unavailable"
+            payload["message"] = errorDescription ?? ""
+            payload["details"] = message
         }
 
         let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data("{}".utf8)

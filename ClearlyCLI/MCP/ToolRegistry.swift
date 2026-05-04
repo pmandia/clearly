@@ -3,7 +3,15 @@ import ClearlyCore
 import MCP
 
 enum ToolRegistry {
-    static let writeToolNames: Set<String> = ["create_note", "update_note", "move_note"]
+    static let writeToolNames: Set<String> = [
+        "create_note",
+        "update_note",
+        "move_note",
+        "create_review",
+        "stage_review_comment_resolution",
+        "confirm_review_comment_resolution",
+        "publish_review_version"
+    ]
 
     static func listTools(vaults: [LoadedVault], readOnly: Bool = false) -> [Tool] {
         let vaultPaths = vaults.map { $0.url.path }
@@ -23,7 +31,173 @@ enum ToolRegistry {
             openWorldHint: false
         )
 
+        let reviewFileProperties: [String: Value] = [
+            "file_path": .object([
+                "type": .string("string"),
+                "description": .string("Absolute path, vault-relative path, or vault://<vaultId>/<relativePath>. Omit to use Clearly's current document if fresh.")
+            ]),
+            "vault": .object([
+                "type": .string("string"),
+                "description": .string("Optional vault name/path disambiguator for relative file_path.")
+            ])
+        ]
+
+        let reviewContextOutput: Value = .object([
+            "type": .string("object"),
+            "properties": .object([
+                "review": .object(["type": .string("object")]),
+                "schema_version": .object(["type": .string("integer")]),
+                "generated_at": .object(["type": .string("string")]),
+                "vault_id": .object(["type": .string("string")]),
+                "file_id": .object(["type": .string("string")]),
+                "target_relative_path": .object(["type": .string("string")]),
+                "target_absolute_path": .object(["type": .string("string")]),
+                "vault_uri": .object(["type": .string("string")]),
+                "has_linked_review": .object(["type": .string("boolean")])
+            ])
+        ])
+
         let tools = [
+            Tool(
+                name: "get_current_document",
+                description: "Return the active document from the running Clearly app. Requires Clearly's current-document heartbeat to be fresh; otherwise pass file_path to review tools explicitly.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object([:])
+                ]),
+                annotations: readAnnotations,
+                outputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "app_instance_id": .object(["type": .string("string")]),
+                        "updated_at": .object(["type": .string("string")]),
+                        "vault_id": .object(["type": .string("string")]),
+                        "vault_root": .object(["type": .string("string")]),
+                        "file_id": .object(["type": .string("string")]),
+                        "target_relative_path": .object(["type": .string("string")]),
+                        "target_absolute_path": .object(["type": .string("string")]),
+                        "document_title": .object(["type": .string("string")])
+                    ])
+                ])
+            ),
+            Tool(
+                name: "get_review_for_file",
+                description: "Resolve local Clearly ReviewState for a document. Accepts absolute path, vault-relative path, or vault:// URI. Does not hit the hosted review service.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties)
+                ]),
+                annotations: readAnnotations,
+                outputSchema: reviewContextOutput
+            ),
+            Tool(
+                name: "sync_review_comments",
+                description: "Fetch latest comments for a linked hosted review, page through the API, and update the local comments cache. Requires CLEARLY_REVIEW_API_BASE_URL plus a publisher token from Keychain or CLEARLY_REVIEW_PUBLISHER_TOKEN.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties)
+                ]),
+                annotations: readAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "create_review",
+                description: "Create a hosted Clearly review for the current local Markdown file, publish the initial sanitized snapshot, store the returned publisher token in Keychain, and link the local ReviewState record. Requires CLEARLY_REVIEW_API_BASE_URL and CLEARLY_REVIEW_PUBLISHER_TOKEN for the initial create.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties)
+                ]),
+                annotations: writeAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "get_review_comments",
+                description: "Get review comments for a document. Defaults to freshness='latest' (sync first); pass freshness='cache' to read the local comments cache only.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties.merging([
+                        "status": .object(["type": .string("string"), "description": .string("Optional status filter such as open or resolved.")]),
+                        "freshness": .object(["type": .string("string"), "enum": .array([.string("latest"), .string("cache")]), "description": .string("Default latest. Use cache to avoid network.")
+                        ])
+                    ]) { _, new in new })
+                ]),
+                annotations: readAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "stage_review_comment_resolution",
+                description: "Stage a local pending resolution for a review comment after editing. This is local-only and does not mark the remote comment resolved.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties.merging([
+                        "comment_id": .object(["type": .string("string")]),
+                        "note": .object(["type": .string("string")]),
+                        "remote_revision": .object(["type": .string("integer")])
+                    ]) { _, new in new }),
+                    "required": .array([.string("comment_id")])
+                ]),
+                annotations: writeAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "confirm_review_comment_resolution",
+                description: "Confirm a staged resolution after the user reviews/accepts edits. Requires confirm=true and expected_revision unless a staged resolution already has remote_revision.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties.merging([
+                        "comment_id": .object(["type": .string("string")]),
+                        "note": .object(["type": .string("string")]),
+                        "expected_revision": .object(["type": .string("integer")]),
+                        "confirm": .object(["type": .string("boolean")])
+                    ]) { _, new in new }),
+                    "required": .array([.string("comment_id"), .string("confirm")])
+                ]),
+                annotations: writeAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "publish_review_version",
+                description: "Render the current on-disk Markdown into a sanitized, source-mapped snapshot and publish it as a new hosted review version. Requires a configured review service and publisher token.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties)
+                ]),
+                annotations: writeAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "get_review_forks",
+                description: "List reviewer Markdown forks for a linked hosted review from the configured review service.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties)
+                ]),
+                annotations: readAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
+            Tool(
+                name: "get_review_fork",
+                description: "Fetch one reviewer Markdown fork, including its diff metadata and full Markdown source, for local review/import.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(false),
+                    "properties": .object(reviewFileProperties.merging([
+                        "fork_id": .object(["type": .string("string")])
+                    ]) { _, new in new }),
+                    "required": .array([.string("fork_id")])
+                ]),
+                annotations: readAnnotations,
+                outputSchema: .object(["type": .string("object")])
+            ),
             Tool(
                 name: "semantic_search",
                 description: "Conceptual search across notes via on-device embeddings (Apple's NLContextualEmbedding). Use when the user's question doesn't share keywords with the relevant notes — e.g. asking about 'productivity' when the note actually says 'flow state' or 'concentrated work'. Searches \(vaults.count) vault(s): \(vaultDescription). For exact phrases, proper nouns, or filename-style targets, prefer search_notes (FTS5) instead.",

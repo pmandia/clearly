@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import ClearlyCore
+import Combine
 
 // MARK: - Toolbar (root-attached)
 
@@ -24,6 +25,7 @@ struct MacDetailToolbar: ToolbarContent {
     @ObservedObject var outlineState: OutlineState
     @ObservedObject var backlinksState: BacklinksState
     @Bindable var wikiController: WikiOperationController
+    @Bindable var reviewSidebar: ReviewSidebarState
     @Binding var showFormatPopover: Bool
     @AppStorage(WYSIWYGExperiment.userDefaultsKey) private var wysiwygExperimentEnabled: Bool = false
 
@@ -100,6 +102,12 @@ struct MacDetailToolbar: ToolbarContent {
                         Button("Copy Wiki Link") { CopyActions.copyWikiLink(target) }
                     }
                     Divider()
+                    if let root = workspace.containingVaultRoot(for: url) {
+                        Button("Copy Review Link") { CopyActions.copyReviewLink(url, vaultRoot: root) }
+                        Button("Copy Review Prompt") { CopyActions.copyReviewPrompt(url, vaultRoot: root) }
+                        Button("Copy Review Context Path") { CopyActions.copyReviewContextPath(url, vaultRoot: root) }
+                        Divider()
+                    }
                 }
                 Button("Copy Markdown") { CopyActions.copyMarkdown(workspace.currentFileText) }
                 Button("Copy HTML") { CopyActions.copyHTML(workspace.currentFileText) }
@@ -109,6 +117,36 @@ struct MacDetailToolbar: ToolbarContent {
                 Label("Copy", systemImage: "doc.on.doc")
             }
             .help("Copy document content")
+            .menuIndicator(.hidden)
+            .disabled(workspace.activeDocumentID == nil)
+
+            Menu {
+                Button("Review Comments") {
+                    toggleReviewSidebar()
+                }
+                Button("Share for Review") {
+                    showReviewSidebarAndCreate()
+                }
+                Button("Sync Review Comments") {
+                    showReviewSidebarAndSync()
+                }
+                Button("Publish New Version") {
+                    showReviewSidebarAndPublish()
+                }
+                Divider()
+                if let url = workspace.currentFileURL,
+                   let root = workspace.containingVaultRoot(for: url) {
+                    Button("Copy Review Prompt") {
+                        CopyActions.copyReviewPrompt(url, vaultRoot: root)
+                    }
+                    Button("Copy Review Context Path") {
+                        CopyActions.copyReviewContextPath(url, vaultRoot: root)
+                    }
+                }
+            } label: {
+                Label("Review", systemImage: "text.bubble")
+            }
+            .help("Review comments")
             .menuIndicator(.hidden)
             .disabled(workspace.activeDocumentID == nil)
 
@@ -193,6 +231,39 @@ struct MacDetailToolbar: ToolbarContent {
             .help("Chat with this vault (⌃⌘A)")
         }
     }
+
+    private func reviewTarget() -> (fileURL: URL, vaultRoot: URL)? {
+        guard let fileURL = workspace.currentFileURL,
+              let vaultRoot = workspace.containingVaultRoot(for: fileURL) else {
+            return nil
+        }
+        return (fileURL, vaultRoot)
+    }
+
+    private func toggleReviewSidebar() {
+        guard let target = reviewTarget() else { return }
+        withAnimation(Theme.Motion.smooth) {
+            reviewSidebar.toggle(fileURL: target.fileURL, vaultRoot: target.vaultRoot)
+        }
+    }
+
+    private func showReviewSidebarAndSync() {
+        guard let target = reviewTarget() else { return }
+        reviewSidebar.show(fileURL: target.fileURL, vaultRoot: target.vaultRoot)
+        reviewSidebar.syncCurrent()
+    }
+
+    private func showReviewSidebarAndCreate() {
+        guard let target = reviewTarget() else { return }
+        reviewSidebar.show(fileURL: target.fileURL, vaultRoot: target.vaultRoot)
+        reviewSidebar.createReview()
+    }
+
+    private func showReviewSidebarAndPublish() {
+        guard let target = reviewTarget() else { return }
+        reviewSidebar.show(fileURL: target.fileURL, vaultRoot: target.vaultRoot)
+        reviewSidebar.publishCurrentVersion()
+    }
 }
 
 /// Detail column for the native shell — editor/preview ZStack with opacity
@@ -214,12 +285,15 @@ struct MacDetailColumn: View {
     @Bindable var wikiChat: WikiChatState
     @Bindable var wikiLog: WikiLogState
     @Bindable var wikiCapture: WikiCaptureState
+    @Bindable var reviewSidebar: ReviewSidebarState
     @Binding var positionSyncID: String
     @Binding var showFormatPopover: Bool
 
     @StateObject private var fileWatcher = FileWatcher()
     @State private var isFullscreen = false
     @State private var pendingWikiNavigation: PendingWikiNavigation?
+    @State private var reviewAppInstanceID = "app_\(UUID().uuidString.lowercased())"
+    private let reviewDocumentHeartbeat = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     @AppStorage("editorFontSize") private var fontSize: Double = 16
     @AppStorage("previewFontFamily") private var previewFontFamily: String = "sanFrancisco"
@@ -263,6 +337,16 @@ struct MacDetailColumn: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
+            if reviewSidebar.isVisible {
+                Divider()
+                ReviewCommentsSidebar(
+                    state: reviewSidebar,
+                    fileURL: workspace.currentFileURL,
+                    vaultRoot: workspace.currentFileURL.flatMap { workspace.containingVaultRoot(for: $0) }
+                )
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+
             if wikiLog.isVisible {
                 Divider()
                 WikiLogSidebar(
@@ -287,8 +371,12 @@ struct MacDetailColumn: View {
         .animation(Theme.Motion.smooth, value: outlineState.isVisible)
         .animation(Theme.Motion.smooth, value: wikiChat.isVisible)
         .animation(Theme.Motion.smooth, value: wikiLog.isVisible)
+        .animation(Theme.Motion.smooth, value: reviewSidebar.isVisible)
         .navigationTitle(documentTitle)
         .onAppear(perform: handleAppear)
+        .onReceive(reviewDocumentHeartbeat) { _ in
+            writeCurrentReviewDocumentState()
+        }
         .onChange(of: workspace.activeLocation?.id) { _, _ in
             handleActiveVaultChanged()
         }
@@ -328,6 +416,8 @@ struct MacDetailColumn: View {
             outlineState.parseHeadings(from: workspace.currentFileText)
             backlinksState.update(for: workspace.currentFileURL, using: workspace.activeVaultIndexes)
             setupFileWatcher()
+            writeCurrentReviewDocumentState()
+            reloadReviewSidebarIfNeeded()
             applyPendingWikiNavigationIfNeeded()
         }
         .onChange(of: workspace.currentViewMode) { oldMode, newMode in
@@ -356,6 +446,8 @@ struct MacDetailColumn: View {
         }
         .onChange(of: workspace.currentFileURL) { _, _ in
             setupFileWatcher()
+            writeCurrentReviewDocumentState()
+            reloadReviewSidebarIfNeeded()
         }
         .onChange(of: workspace.vaultIndexRevision) { _, _ in
             backlinksState.update(for: workspace.currentFileURL, using: workspace.activeVaultIndexes)
@@ -394,7 +486,8 @@ struct MacDetailColumn: View {
             wikiController: wikiController,
             wikiChat: wikiChat,
             wikiLog: wikiLog,
-            wikiCapture: wikiCapture
+            wikiCapture: wikiCapture,
+            reviewSidebar: reviewSidebar
         ))
     }
 
@@ -419,6 +512,7 @@ struct MacDetailColumn: View {
         backlinksState.update(for: workspace.currentFileURL, using: workspace.activeVaultIndexes)
         isFullscreen = NSApp.mainWindow?.styleMask.contains(.fullScreen) ?? false
         setupFileWatcher()
+        writeCurrentReviewDocumentState()
         warmAndReviewActiveVaultIfNeeded()
     }
 
@@ -674,6 +768,7 @@ struct MacDetailColumn: View {
             wikiChat.hide()
         }
 
+        reloadReviewSidebarIfNeeded()
         warmAndReviewActiveVaultIfNeeded()
     }
 
@@ -695,6 +790,27 @@ struct MacDetailColumn: View {
             workspace.externalFileDidChange(newText)
         }
         fileWatcher.watch(url, currentText: workspace.currentFileText)
+    }
+
+    private func writeCurrentReviewDocumentState() {
+        guard let fileURL = workspace.currentFileURL,
+              let vaultRoot = workspace.containingVaultRoot(for: fileURL) else { return }
+        do {
+            try ReviewStateStore.writeCurrentDocument(
+                fileURL: fileURL,
+                vaultRoot: vaultRoot,
+                documentTitle: documentTitle.replacingOccurrences(of: "\u{2022} ", with: ""),
+                appInstanceId: reviewAppInstanceID
+            )
+        } catch {
+            DiagnosticLog.log("ReviewState: failed to write current document state — \(error)")
+        }
+    }
+
+    private func reloadReviewSidebarIfNeeded() {
+        let fileURL = workspace.currentFileURL
+        let vaultRoot = fileURL.flatMap { workspace.containingVaultRoot(for: $0) }
+        reviewSidebar.reloadIfVisible(fileURL: fileURL, vaultRoot: vaultRoot)
     }
 
     private func toggleTask(at line: Int, checked: Bool, workspace: WorkspaceManager) {
@@ -842,6 +958,7 @@ private struct WikiNotificationObserversModifier: ViewModifier {
     @Bindable var wikiChat: WikiChatState
     @Bindable var wikiLog: WikiLogState
     @Bindable var wikiCapture: WikiCaptureState
+    @Bindable var reviewSidebar: ReviewSidebarState
 
     func body(content: Content) -> some View {
         content
@@ -854,6 +971,13 @@ private struct WikiNotificationObserversModifier: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .wikiToggleLogSidebar)) { _ in
                 withAnimation(Theme.Motion.smooth) {
                     wikiLog.toggle(vaultRoot: workspace.activeLocation?.url)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .reviewToggleSidebar)) { _ in
+                withAnimation(Theme.Motion.smooth) {
+                    let fileURL = workspace.currentFileURL
+                    let vaultRoot = fileURL.flatMap { workspace.containingVaultRoot(for: $0) }
+                    reviewSidebar.toggle(fileURL: fileURL, vaultRoot: vaultRoot)
                 }
             }
     }
