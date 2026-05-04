@@ -136,11 +136,7 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       font-size: 14px;
       line-height: 1.25;
     }
-    .composer-title span {
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-    }
+    .section-title button { font-size: 12px; }
     label {
       display: block;
       margin: 12px 0 6px;
@@ -224,11 +220,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       gap: 12px;
       margin-bottom: 10px;
     }
-    .count {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 500;
-    }
     .comments {
       display: grid;
       gap: 10px;
@@ -254,6 +245,11 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-soft);
     }
+    .comment.is-editing {
+      cursor: default;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
     .comment-meta {
       display: flex;
       align-items: center;
@@ -266,12 +262,10 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       color: var(--text);
       font-size: 13px;
     }
-    .pill {
-      border-radius: 999px;
-      padding: 2px 7px;
-      background: var(--surface-muted);
-      color: var(--muted);
-      font-size: 11px;
+    .comment-time::before {
+      content: "·";
+      margin-right: 8px;
+      color: var(--soft);
     }
     .quote {
       margin: 0 0 9px;
@@ -310,31 +304,31 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       padding: 4px 8px;
       font-size: 12px;
     }
-
-    .fork-card {
-      margin: 0 24px 24px;
-      padding: 0;
+    .comment-edit-form {
+      display: grid;
+      gap: 8px;
+      margin-top: 4px;
     }
-    .fork-card summary {
-      padding: 13px 14px;
-      color: var(--muted);
-      cursor: pointer;
-      user-select: none;
+    .comment-edit-form label {
+      margin: 0;
     }
-    .fork-body {
-      border-top: 1px solid var(--border);
-      padding: 14px;
+    .comment-edit-form textarea {
+      min-height: 86px;
+      font-size: 14px;
     }
-    .fork-body textarea {
-      min-height: 220px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-    }
-    .fork-actions {
+    .comment-edit-actions {
       display: flex;
       justify-content: flex-end;
       gap: 8px;
-      margin-top: 10px;
+    }
+    .comment-edit-actions button {
+      padding: 5px 9px;
+      font-size: 12px;
+    }
+    .edit-error {
+      min-height: 16px;
+      color: #b42318;
+      font-size: 12px;
     }
 
     @media (max-width: 860px) {
@@ -376,7 +370,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
         <form class="composer-card" id="comment-form" data-role="review-composer">
           <div class="composer-title">
             <h2>New comment</h2>
-            <span id="selection-state-label">General comment</span>
           </div>
 
           <div class="selection-box" id="selected">Highlight text in the document to attach this comment to a specific passage.</div>
@@ -403,24 +396,11 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
 
         <section class="section" aria-label="Comments">
           <div class="section-title">
-            <h2>Comments <span class="count" id="comment-count"></span></h2>
+            <h2>Comments</h2>
             <button type="button" class="subtle" id="refresh-comments">Refresh</button>
           </div>
           <div class="comments" id="comments"></div>
         </section>
-
-        <details class="card fork-card">
-          <summary>Fork the Markdown instead</summary>
-          <div class="fork-body">
-            <p class="meta">Use this when a full alternate draft is clearer than individual comments.</p>
-            <div class="fork-actions">
-              <button type="button" id="load-fork">Load Markdown</button>
-              <button class="primary" type="button" id="submit-fork" disabled>Submit Fork</button>
-            </div>
-            <label for="fork-markdown">Markdown fork</label>
-            <textarea id="fork-markdown" spellcheck="false" placeholder="Load the Markdown, edit it here, then submit the fork."></textarea>
-          </div>
-        </details>
       </div>
     </aside>
   </main>
@@ -430,16 +410,15 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     const token = root.dataset.token;
     const frame = document.getElementById("snapshot");
     const selectedBox = document.getElementById("selected");
-    const selectionStateLabel = document.getElementById("selection-state-label");
     const postButton = document.getElementById("post-comment");
     const bodyInput = document.getElementById("body");
     const errorBox = document.getElementById("composer-error");
     const commentsContainer = document.getElementById("comments");
-    const commentCount = document.getElementById("comment-count");
     let latestVersion = Number(root.dataset.version);
     let selectedText = "";
     let selectedAnchor = null;
     let commentsCache = [];
+    let editingCommentId = null;
 
     const guestIdKey = "clearlyReviewGuestId:" + token;
     const guestNameKey = "clearlyReviewDisplayName";
@@ -459,8 +438,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
     document.getElementById("comment-form").addEventListener("submit", postComment);
     document.getElementById("clear-selection").addEventListener("click", () => clearSelection(true));
     document.getElementById("refresh-comments").addEventListener("click", loadComments);
-    document.getElementById("load-fork").addEventListener("click", loadForkMarkdown);
-    document.getElementById("submit-fork").addEventListener("click", submitFork);
     nameInput.addEventListener("change", () => localStorage.setItem(guestNameKey, nameInput.value.trim()));
     nameInput.addEventListener("input", () => localStorage.setItem(guestNameKey, nameInput.value.trim()));
     bodyInput.addEventListener("input", updateComposerState);
@@ -595,7 +572,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
 
     function renderSelectedText() {
       selectedBox.classList.toggle("has-selection", Boolean(selectedText));
-      selectionStateLabel.textContent = selectedText ? "Attached to selection" : "General comment";
       selectedBox.innerHTML = selectedText
         ? "<blockquote>" + escapeText(selectedText) + "</blockquote>"
         : "Highlight text in the document to attach this comment to a specific passage.";
@@ -683,8 +659,6 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
 
     function renderComments() {
       const comments = commentsCache;
-      const openCount = comments.filter(comment => comment.status === "open").length;
-      commentCount.textContent = comments.length ? "(" + openCount + " open / " + comments.length + " total)" : "";
       if (!comments.length) {
         commentsContainer.innerHTML = '<div class="empty">No comments yet. Highlight text in the document to start a review thread.</div>';
         return;
@@ -692,16 +666,15 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
 
       commentsContainer.innerHTML = comments.map(comment => {
         const id = comment.id || comment.commentId;
-        const confidence = comment.anchorConfidence || (comment.currentAnchor && comment.currentAnchor.confidence) || (comment.anchor && comment.anchor.confidence) || "exact";
-        return '<article class="card comment" data-comment-id="' + escapeText(id) + '">' +
+        const isEditing = id === editingCommentId;
+        return '<article class="card comment' + (isEditing ? ' is-editing' : '') + '" data-comment-id="' + escapeText(id) + '">' +
           '<div class="comment-meta"><strong>' + escapeText(comment.authorDisplayName || comment.author || "Reviewer") + '</strong>' +
-          '<span class="pill">' + escapeText(comment.status || "open") + '</span>' +
-          '<span class="pill">' + escapeText(confidence) + '</span>' +
-          '<span>' + escapeText(formatDate(comment.createdAt)) + '</span></div>' +
+          '<span class="comment-time">' + escapeText(formatTimestamp(comment.createdAt)) + '</span>' +
+          (comment.status === "resolved" ? '<span>Resolved</span>' : '') + '</div>' +
           (comment.selectedText ? '<blockquote class="quote">' + escapeText(comment.selectedText) + '</blockquote>' : '') +
-          '<p class="comment-body">' + escapeText(comment.body) + '</p>' +
-          (comment.suggestedReplacement ? '<div class="replacement"><strong>Suggested replacement</strong><br>' + escapeText(comment.suggestedReplacement) + '</div>' : '') +
-          actionsFor(comment) +
+          (isEditing ? editFormFor(comment) : '<p class="comment-body">' + escapeText(comment.body) + '</p>') +
+          (!isEditing && comment.suggestedReplacement ? '<div class="replacement"><strong>Suggested replacement</strong><br>' + escapeText(comment.suggestedReplacement) + '</div>' : '') +
+          (!isEditing ? actionsFor(comment) : '') +
           '</article>';
       }).join("");
 
@@ -714,12 +687,50 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       });
       commentsContainer.querySelectorAll("[data-edit-comment]").forEach(button => button.addEventListener("click", event => {
         event.stopPropagation();
-        editComment(button.dataset.editComment);
+        startEditingComment(button.dataset.editComment);
       }));
+      commentsContainer.querySelectorAll("[data-edit-cancel]").forEach(button => button.addEventListener("click", event => {
+        event.stopPropagation();
+        cancelCommentEdit();
+      }));
+      commentsContainer.querySelectorAll("[data-edit-form]").forEach(form => {
+        form.addEventListener("click", event => event.stopPropagation());
+        form.addEventListener("submit", event => {
+          event.preventDefault();
+          saveCommentEdit(form.dataset.editForm);
+        });
+        const textarea = form.querySelector("[data-edit-body]");
+        if (textarea) {
+          textarea.addEventListener("keydown", event => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancelCommentEdit();
+            }
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.preventDefault();
+              saveCommentEdit(form.dataset.editForm);
+            }
+          });
+        }
+      });
+      if (editingCommentId) focusEditTextarea(editingCommentId);
       commentsContainer.querySelectorAll("[data-reopen-comment]").forEach(button => button.addEventListener("click", event => {
         event.stopPropagation();
         reopenComment(button.dataset.reopenComment);
       }));
+    }
+
+    function editFormFor(comment) {
+      const id = comment.id || comment.commentId;
+      return '<form class="comment-edit-form" data-edit-form="' + escapeText(id) + '">' +
+        '<label>Edit comment</label>' +
+        '<textarea data-edit-body maxlength="10000" aria-label="Edit comment">' + escapeText(comment.body) + '</textarea>' +
+        '<div class="edit-error" data-edit-error role="status"></div>' +
+        '<div class="comment-edit-actions">' +
+          '<button type="button" data-edit-cancel="' + escapeText(id) + '">Cancel</button>' +
+          '<button class="primary" type="submit" data-edit-save="' + escapeText(id) + '">Save</button>' +
+        '</div>' +
+      '</form>';
     }
 
     function actionsFor(comment) {
@@ -736,11 +747,49 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
       return buttons.length ? '<div class="comment-actions">' + buttons.join("") + '</div>' : "";
     }
 
-    async function editComment(commentId) {
+    function startEditingComment(commentId) {
       const comment = commentsCache.find(item => (item.id || item.commentId) === commentId);
       if (!comment) return;
-      const body = prompt("Edit comment", comment.body || "");
-      if (body === null || !body.trim()) return;
+      editingCommentId = commentId;
+      renderComments();
+    }
+
+    function cancelCommentEdit() {
+      editingCommentId = null;
+      renderComments();
+    }
+
+    function focusEditTextarea(commentId) {
+      requestAnimationFrame(() => {
+        const form = editFormElement(commentId);
+        const textarea = form && form.querySelector("[data-edit-body]");
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      });
+    }
+
+    function editFormElement(commentId) {
+      return Array.from(commentsContainer.querySelectorAll("[data-edit-form]"))
+        .find(form => form.dataset.editForm === commentId) || null;
+    }
+
+    async function saveCommentEdit(commentId) {
+      const comment = commentsCache.find(item => (item.id || item.commentId) === commentId);
+      const form = editFormElement(commentId);
+      const textarea = form && form.querySelector("[data-edit-body]");
+      const error = form && form.querySelector("[data-edit-error]");
+      const saveButton = form && form.querySelector("[data-edit-save]");
+      if (!comment || !form || !textarea) return;
+      const body = textarea.value.trim();
+      if (!body) {
+        if (error) error.textContent = "Comment cannot be empty.";
+        return;
+      }
+      if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = "Saving...";
+      }
       const response = await fetch("/api/reviews/" + encodeURIComponent(root.dataset.reviewId) + "/comments/" + encodeURIComponent(commentId), {
         method: "PATCH",
         headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
@@ -751,9 +800,14 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
         })
       });
       if (!response.ok) {
-        alert(await response.text());
+        if (error) error.textContent = await response.text();
+        if (saveButton) {
+          saveButton.disabled = false;
+          saveButton.textContent = "Save";
+        }
         return;
       }
+      editingCommentId = null;
       await loadComments();
     }
 
@@ -930,47 +984,10 @@ export function renderReviewPage(review: ReviewRecord, latestVersion: ReviewVers
         .find(mark => mark.dataset.reviewHighlight === commentId) || null;
     }
 
-    async function loadForkMarkdown() {
-      const signed = await fetch("/r/" + encodeURIComponent(token) + "/source-url/" + latestVersion);
-      if (!signed.ok) {
-        alert(await signed.text());
-        return;
-      }
-      const signedPayload = await signed.json();
-      const response = await fetch(signedPayload.markdownUrl);
-      if (!response.ok) {
-        alert(await response.text());
-        return;
-      }
-      document.getElementById("fork-markdown").value = await response.text();
-      document.getElementById("submit-fork").disabled = false;
-    }
-
-    async function submitFork() {
-      const displayName = nameInput.value.trim() || "Reviewer";
-      localStorage.setItem(guestNameKey, displayName);
-      const markdown = document.getElementById("fork-markdown").value;
-      const response = await fetch("/r/" + encodeURIComponent(token) + "/forks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          version: latestVersion,
-          author: { authorId: guestId, displayName },
-          markdown
-        })
-      });
-      if (!response.ok) {
-        alert(await response.text());
-        return;
-      }
-      document.getElementById("submit-fork").disabled = true;
-      alert("Fork submitted.");
-    }
-
-    function formatDate(value) {
+    function formatTimestamp(value) {
       if (!value) return "";
       try {
-        return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       } catch {
         return "";
       }

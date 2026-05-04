@@ -64,8 +64,13 @@ test("creates a review, accepts public comments, and lets publisher resolve them
   assert.match(page.body, /New comment/);
   assert.match(page.body, /mark\[data-review-highlight\]/);
   assert.match(page.body, /function scrollToCommentAnchor/);
+  assert.match(page.body, /data-edit-form/);
   assert.doesNotMatch(page.body, /selection-popover/);
   assert.doesNotMatch(page.body, /Use Selection/);
+  assert.doesNotMatch(page.body, /prompt\(/);
+  assert.doesNotMatch(page.body, /Fork the Markdown/);
+  assert.doesNotMatch(page.body, /General comment/);
+  assert.doesNotMatch(page.body, /comment-count/);
 
   const snapshot = await app.inject({ method: "GET", url: `/r/${created.publicReviewToken}/snapshot/1` });
   assert.equal(snapshot.statusCode, 200, snapshot.body);
