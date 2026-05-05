@@ -191,15 +191,11 @@ struct ReviewCommentsSidebar: View {
     private var reviewLinkPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Review link ready")
+                Text(documentDisplayName)
                     .font(.headline)
-                if let context = state.context {
-                    Text(context.targetRelativePath)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                }
+                Text("Link ready")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
@@ -226,7 +222,7 @@ struct ReviewCommentsSidebar: View {
                 Button {
                     state.syncCurrent()
                 } label: {
-                    Label("Fetch", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Fetch Comments", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.bordered)
                 .disabled(state.isBusy || state.context?.reviewId == nil)
@@ -272,32 +268,40 @@ struct ReviewCommentsSidebar: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(openCount) open")
+                Text("Comments")
                     .font(.headline)
-                if closedCount > 0 {
-                    Text("\(closedCount) closed")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text("\(resolvedCount) resolved")
+                Spacer()
+                Text(actionItemLabel(openCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if pendingCount > 0 {
-                    Text("\(pendingCount) pending")
-                        .font(.caption)
-                        .foregroundStyle(.tint)
-                }
-                Spacer()
             }
             Text(syncLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if closedCount > 0 || resolvedCount > 0 || pendingCount > 0 {
+                HStack(spacing: 8) {
+                    if closedCount > 0 {
+                        Text("\(closedCount) dismissed")
+                    }
+                    if resolvedCount > 0 {
+                        Text("\(resolvedCount) done")
+                    }
+                    if pendingCount > 0 {
+                        Text("\(pendingCount) pending")
+                            .foregroundStyle(.tint)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
     }
 
     private var emptyComments: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("No \(state.filter.label.lowercased()) comments.")
+            Text(state.filter.emptyTitle)
                 .font(.headline)
             Text(syncLabel)
                 .font(.callout)
@@ -308,6 +312,17 @@ struct ReviewCommentsSidebar: View {
 
     private var reviewURL: URL? {
         ReviewLinkFormatter.absoluteURL(state.context?.reviewUrl)
+    }
+
+    private var documentDisplayName: String {
+        guard let target = state.context?.targetRelativePath, !target.isEmpty else {
+            return "Current document"
+        }
+        return target.split(separator: "/").last.map(String.init) ?? target
+    }
+
+    private func actionItemLabel(_ count: Int) -> String {
+        count == 1 ? "1 action item" : "\(count) action items"
     }
 
     private var syncLabel: String {
@@ -341,37 +356,50 @@ private struct ReviewCommentRow: View {
     @State private var confirmDelete = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(comment.author.isEmpty ? "Reviewer" : comment.author)
-                    .font(.callout)
-                    .fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text(displayAuthor)
+                    .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
-                Text(statusLabel)
-                    .font(.caption2)
-                    .foregroundStyle(statusColor)
+
+                if let visibleStatusLabel {
+                    Text(visibleStatusLabel)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(statusColor)
+                }
+
+                if let placementLabel {
+                    Text(placementLabel)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
                 if isPendingResolution {
                     Text("pending")
-                        .font(.caption2)
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.tint)
                 }
+
                 Spacer(minLength: 0)
-                Text("v\(comment.version)")
-                    .font(.caption2)
+
+                Text(timestampLabel)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
             Text(comment.body)
-                .font(.callout)
+                .font(.system(size: 13))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
 
             if let selectedText = comment.selectedText, !selectedText.isEmpty {
                 Text(selectedText)
-                    .font(.caption)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(4)
-                    .padding(8)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
                     .textSelection(.enabled)
@@ -390,28 +418,16 @@ private struct ReviewCommentRow: View {
                 }
             }
 
-            HStack(spacing: 6) {
-                Text(anchorLabel)
-                Text(effectiveConfidence.rawValue)
-                if comment.orphaned {
-                    Text("unplaced")
-                        .foregroundStyle(.orange)
-                }
-                Text(comment.id)
-                    .truncationMode(.middle)
-            }
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
-
             if canMutate {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     if statusLabel == "open" {
-                        Button("Close") {
+                        Button("Dismiss") {
                             onClose()
                         }
                         .buttonStyle(.borderless)
+                        .help("Keep this comment in history, but remove it from Needs Action.")
                     }
+
                     Button(confirmDelete ? "Confirm Delete" : "Delete", role: .destructive) {
                         if confirmDelete {
                             onDelete()
@@ -420,19 +436,33 @@ private struct ReviewCommentRow: View {
                         }
                     }
                     .buttonStyle(.borderless)
+                    .help("Hide this comment from normal review lists.")
+
                     if confirmDelete {
                         Button("Cancel") {
                             confirmDelete = false
                         }
                         .buttonStyle(.borderless)
                     }
+
+                    Spacer(minLength: 0)
+                    Text("v\(comment.version)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
                 }
-                .font(.caption)
+                .font(.system(size: 12))
                 .disabled(isPendingResolution)
+            } else {
+                HStack {
+                    Spacer(minLength: 0)
+                    Text("v\(comment.version)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private var statusLabel: String {
@@ -448,24 +478,26 @@ private struct ReviewCommentRow: View {
         }
     }
 
+    private var visibleStatusLabel: String? {
+        switch statusLabel {
+        case "open":
+            return nil
+        case "closed":
+            return "Dismissed"
+        case "resolved":
+            return "Done"
+        default:
+            return statusLabel.capitalized
+        }
+    }
+
     private var canMutate: Bool {
         comment.status != "resolved" && comment.status != "deleted"
     }
 
-    private var anchorLabel: String {
-        switch effectiveAnchor.blockType {
-        case .paragraph: return "paragraph"
-        case .heading: return "heading"
-        case .listItem: return "list"
-        case .quote: return "quote"
-        case .code: return "code"
-        case .table: return "table"
-        case .math: return "math"
-        case .mermaid: return "mermaid"
-        case .image: return "image"
-        case .frontmatter: return "frontmatter"
-        case .multiBlock: return "multi-block"
-        }
+    private var displayAuthor: String {
+        let trimmed = comment.author.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Reviewer" : trimmed
     }
 
     private var effectiveAnchor: ReviewAnchor {
@@ -474,5 +506,24 @@ private struct ReviewCommentRow: View {
 
     private var effectiveConfidence: ReviewAnchorConfidence {
         comment.anchorConfidence ?? effectiveAnchor.confidence
+    }
+
+    private var placementLabel: String? {
+        if comment.orphaned { return "Unplaced" }
+        switch effectiveConfidence {
+        case .exact:
+            return nil
+        case .fuzzy:
+            return "Remapped"
+        case .section:
+            return "Section only"
+        case .orphan:
+            return "Unplaced"
+        }
+    }
+
+    private var timestampLabel: String {
+        guard let date = comment.updatedAt ?? comment.createdAt else { return "" }
+        return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 }

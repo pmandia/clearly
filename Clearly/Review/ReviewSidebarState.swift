@@ -11,10 +11,19 @@ enum ReviewCommentsFilter: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .open: return "Open"
-        case .closed: return "Closed"
-        case .resolved: return "Resolved"
+        case .open: return "Needs Action"
+        case .closed: return "Dismissed"
+        case .resolved: return "Done"
         case .all: return "All"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .open: return "No comments need action."
+        case .closed: return "No dismissed comments."
+        case .resolved: return "No done comments."
+        case .all: return "No comments."
         }
     }
 }
@@ -122,7 +131,7 @@ final class ReviewSidebarState {
     }
 
     func closeComment(_ comment: ReviewComment) {
-        runCommentAction("close", comment: comment, note: "Closed without changes.")
+        runCommentAction("close", comment: comment, note: "Dismissed without changes.")
     }
 
     func deleteComment(_ comment: ReviewComment) {
@@ -155,7 +164,7 @@ final class ReviewSidebarState {
             await MainActor.run {
                 isBusy = false
                 if result.succeeded {
-                    lastActionMessage = action == "delete" ? "Comment deleted." : "Comment closed."
+                    lastActionMessage = action == "delete" ? "Comment deleted." : "Comment dismissed."
                     reload(fileURL: activeFileURL, vaultRoot: activeVaultRoot)
                 } else {
                     lastError = result.displayMessage
