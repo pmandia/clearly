@@ -262,9 +262,6 @@ struct ReviewCommentsSidebar: View {
     private var reviewSummary: some View {
         let comments = state.cache?.comments ?? []
         let openCount = comments.filter { $0.status == "open" || $0.status.isEmpty }.count
-        let closedCount = comments.filter { $0.status == "closed" }.count
-        let resolvedCount = comments.filter { $0.status == "resolved" }.count
-        let pendingCount = state.pendingResolutions.pending.count
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -278,24 +275,6 @@ struct ReviewCommentsSidebar: View {
             Text(syncLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-            if closedCount > 0 || resolvedCount > 0 || pendingCount > 0 {
-                HStack(spacing: 8) {
-                    if closedCount > 0 {
-                        Text("\(closedCount) dismissed")
-                    }
-                    if resolvedCount > 0 {
-                        Text("\(resolvedCount) done")
-                    }
-                    if pendingCount > 0 {
-                        Text("\(pendingCount) pending")
-                            .foregroundStyle(.tint)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
         }
     }
 

@@ -67,6 +67,17 @@ final class ReviewSidebarState {
         }
     }
 
+    func previewHighlightComments(for fileURL: URL?) -> [ReviewComment] {
+        guard isVisible,
+              let fileURL,
+              context?.targetAbsolutePath == fileURL.path else {
+            return []
+        }
+        return (cache?.comments ?? []).filter { comment in
+            comment.status == "open" || comment.status.isEmpty
+        }
+    }
+
     func toggle(fileURL: URL?, vaultRoot: URL?) {
         isVisible.toggle()
         if isVisible {

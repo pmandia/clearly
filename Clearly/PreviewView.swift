@@ -34,6 +34,7 @@ struct PreviewView: NSViewRepresentable {
     var onTagClicked: ((String) -> Void)?
     var onJumpToSource: ((Int) -> Void)?
     var wikiFileNames: Set<String>?
+    var reviewComments: [ReviewComment] = []
     var contentWidthEm: CGFloat? = nil
     var extraTopInset: CGFloat = 0
     @AppStorage("hideFrontmatterInPreview") private var hideFrontmatterInPreview = false
@@ -46,11 +47,37 @@ struct PreviewView: NSViewRepresentable {
     }
 
     private var contentKey: String {
-        "\(markdown.count)|\(markdown.hashValue)__\(fontSize)__\(fontFamily)__\(colorScheme == .dark ? "dark" : "light")__\(LocalImageSupport.fileURLKeyFragment(fileURL))__\(wikiFilesKey)__\(contentWidthEm.map { "\($0)" } ?? "off")__\(hideFrontmatterInPreview)"
+        "\(markdown.count)|\(markdown.hashValue)__\(fontSize)__\(fontFamily)__\(colorScheme == .dark ? "dark" : "light")__\(LocalImageSupport.fileURLKeyFragment(fileURL))__\(wikiFilesKey)__\(reviewCommentsKey)__\(contentWidthEm.map { "\($0)" } ?? "off")__\(hideFrontmatterInPreview)"
     }
 
     private var wikiFilesKey: String {
         (wikiFileNames ?? []).sorted().joined(separator: "\n")
+    }
+
+    private var reviewCommentsKey: String {
+        reviewComments
+            .map { comment in
+                [
+                    comment.id,
+                    comment.status,
+                    comment.selectedText ?? "",
+                    comment.currentAnchor?.sourcepos ?? comment.anchor.sourcepos,
+                    comment.updatedAt?.timeIntervalSince1970.description ?? ""
+                ].joined(separator: "|")
+            }
+            .joined(separator: "\n")
+    }
+
+    private var reviewCommentsJSONString: String {
+        guard !reviewComments.isEmpty else { return "[]" }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(reviewComments),
+              var json = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        json = json.replacingOccurrences(of: "</", with: "<\\/")
+        return json
     }
 
     func makeCoordinator() -> Coordinator {
@@ -161,6 +188,7 @@ struct PreviewView: NSViewRepresentable {
         context.coordinator.isLoadingContent = true
         let rawBody = MarkdownRenderer.renderHTML(markdown, appLinkURLs: true, includeFrontmatter: !hideFrontmatterInPreview)
         let htmlBody = LocalImageSupport.resolveImageSources(in: rawBody, relativeTo: fileURL)
+        let reviewCommentsJSON = reviewCommentsJSONString
         let wikiFilesJSON: String = {
             guard let names = wikiFileNames, !names.isEmpty else { return "[]" }
             guard let data = try? JSONSerialization.data(withJSONObject: Array(names)),
@@ -203,12 +231,16 @@ struct PreviewView: NSViewRepresentable {
         mark.clearly-find { background-color: rgba(255, 230, 0, 0.4); border-radius: 2px; padding: 0 1px; }
         mark.clearly-mode-highlight { background: rgba(255, 210, 50, 0.5); border-radius: 3px; padding: 0 1px; transition: background 1.5s ease; }
         mark.clearly-mode-highlight.fade { background: transparent; }
+        mark.clearly-review-highlight { background: rgba(255, 214, 102, 0.46); border-radius: 3px; box-shadow: 0 0 0 1px rgba(201, 146, 0, 0.18); padding: 0 1px; }
+        .clearly-review-block-highlight { outline: 2px solid rgba(201, 146, 0, 0.30); outline-offset: 3px; border-radius: 4px; }
         mark.clearly-outline-flash { background-color: rgba(255, 245, 100, 0.95); color: inherit; border-radius: 3px; padding: 0 2px; box-shadow: 0 0 0 1px rgba(220, 180, 0, 0.5); transition: background-color 1.2s ease, box-shadow 1.2s ease; }
         mark.clearly-outline-flash.fade { background-color: transparent; box-shadow: 0 0 0 1px transparent; }
         mark.clearly-find.current { background-color: rgba(255, 165, 0, 0.6); }
         @media (prefers-color-scheme: dark) {
             mark.clearly-find { background-color: rgba(180, 150, 0, 0.4); }
             mark.clearly-find.current { background-color: rgba(200, 150, 0, 0.6); }
+            mark.clearly-review-highlight { background: rgba(218, 165, 32, 0.36); box-shadow: 0 0 0 1px rgba(255, 214, 102, 0.16); }
+            .clearly-review-block-highlight { outline-color: rgba(255, 214, 102, 0.30); }
         }
         </style>
         </head>
@@ -341,6 +373,92 @@ struct PreviewView: NSViewRepresentable {
                 if (knownFiles.size > 0 && !knownFiles.has(target.toLowerCase())) {
                     a.classList.add('wiki-link-broken');
                 }
+            });
+        })();
+        // Open review comments in the local preview.
+        (function() {
+            var comments = \(reviewCommentsJSON);
+            if (!Array.isArray(comments) || comments.length === 0) return;
+
+            function anchorFor(comment) {
+                return comment.currentAnchor || comment.anchor || {};
+            }
+            function textFor(comment, anchor) {
+                return String(comment.selectedText || anchor.selectedText || '').trim();
+            }
+            function blockFor(anchor) {
+                if (anchor && anchor.sourcepos) {
+                    var sourcepos = String(anchor.sourcepos);
+                    var elements = Array.from(document.querySelectorAll('[data-sourcepos]'));
+                    for (var i = 0; i < elements.length; i++) {
+                        if (elements[i].getAttribute('data-sourcepos') === sourcepos) return elements[i];
+                    }
+                }
+                if (anchor && anchor.headingId) {
+                    var heading = document.getElementById(anchor.headingId);
+                    if (heading) return heading;
+                }
+                return null;
+            }
+            function findTextInDocument(text) {
+                if (!text) return null;
+                var blocks = Array.from(document.querySelectorAll('[data-sourcepos], p, li, blockquote, pre, td, th, h1, h2, h3, h4, h5, h6'));
+                for (var i = 0; i < blocks.length; i++) {
+                    var offset = (blocks[i].textContent || '').indexOf(text);
+                    if (offset >= 0) return { block: blocks[i], text: text, offset: offset };
+                }
+                return null;
+            }
+            function wrapTextRange(rootNode, start, length, commentId) {
+                var end = start + length;
+                var walker = document.createTreeWalker(rootNode, NodeFilter.SHOW_TEXT);
+                var nodes = [];
+                var position = 0;
+                var node;
+                while ((node = walker.nextNode())) {
+                    var value = node.nodeValue || '';
+                    var nodeStart = position;
+                    var nodeEnd = position + value.length;
+                    if (nodeEnd > start && nodeStart < end) {
+                        nodes.push({ node: node, nodeStart: nodeStart });
+                    }
+                    position = nodeEnd;
+                }
+                if (!nodes.length) return false;
+                nodes.forEach(function(item) {
+                    var value = item.node.nodeValue || '';
+                    var localStart = Math.max(0, start - item.nodeStart);
+                    var localEnd = Math.min(value.length, end - item.nodeStart);
+                    if (localEnd <= localStart) return;
+                    var range = document.createRange();
+                    range.setStart(item.node, localStart);
+                    range.setEnd(item.node, localEnd);
+                    var mark = document.createElement('mark');
+                    mark.className = 'clearly-review-highlight';
+                    mark.dataset.reviewCommentId = commentId;
+                    mark.title = 'Review comment';
+                    range.surroundContents(mark);
+                });
+                return true;
+            }
+
+            comments.forEach(function(comment) {
+                if (!comment || (comment.status && comment.status !== 'open')) return;
+                var id = comment.id || comment.commentId || '';
+                var anchor = anchorFor(comment);
+                var text = textFor(comment, anchor);
+                var block = blockFor(anchor);
+                var target = null;
+                if (block) {
+                    var anchorOffset = Number.isFinite(anchor.charOffsetInBlock) ? anchor.charOffsetInBlock : -1;
+                    var textOffset = text ? (block.textContent || '').indexOf(text) : -1;
+                    target = { block: block, text: text, offset: anchorOffset >= 0 ? anchorOffset : textOffset };
+                } else {
+                    target = findTextInDocument(text);
+                }
+                if (!target || !target.block) return;
+                if (target.text && target.offset >= 0 && wrapTextRange(target.block, target.offset, target.text.length, id)) return;
+                target.block.classList.add('clearly-review-block-highlight');
             });
         })();
         // Double-click any element to jump to its source line in the editor.

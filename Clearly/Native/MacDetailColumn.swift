@@ -711,6 +711,7 @@ struct MacDetailColumn: View {
                 scheduleWikiNavigation(lineNumber: line, destinationMode: .edit)
             },
             wikiFileNames: allWikiFileNames,
+            reviewComments: reviewSidebar.previewHighlightComments(for: fileURL),
             contentWidthEm: contentWidthEm,
             extraTopInset: 0
         )
